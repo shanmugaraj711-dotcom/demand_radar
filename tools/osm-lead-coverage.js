@@ -43,9 +43,9 @@ function fuzzyDedupe(rows) {
 }
 function buildQuery(lat, lon, spec) {
   const nameRe = spec.names.map(escRe).join('|');
-  const blocks = spec.tags.map(tag => `nwr[${tag}](around:${RADIUS_M},${lat},${lon});`);
-  blocks.push(`nwr["name"~"${nameRe}",i](around:${RADIUS_M},${lat},${lon});`);
-  return `[out:json][timeout:60];(${blocks.join('')});out center tags;`;
+  const blocks = spec.tags.map(tag => \`nwr[\${tag}](around:\${RADIUS_M},\${lat},\${lon});\`);
+  blocks.push(\`nwr["name"~"\${nameRe}",i](around:\${RADIUS_M},\${lat},\${lon});\`);
+  return \`[out:json][timeout:60];(\${blocks.join('')});out center tags;\`;
 }
 async function overpass(query) {
   const ctl = new AbortController(), timer = setTimeout(() => ctl.abort(), 75000);
@@ -128,18 +128,17 @@ async function main() {
   if (!PROD_DB || !fs.existsSync(PROD_DB)) throw new Error('Set RADAR_PROD_DB to the production radar.db path.');
   if (fs.existsSync(TEST_DB)) fs.rmSync(TEST_DB);
   const src = new DatabaseSync(PROD_DB);
-  src.exec(`VACUUM INTO '${TEST_DB.replace(/'/g, "''")}'`);
+  src.exec(\`VACUUM INTO '\${TEST_DB.replace(/'/g, "''")}'\`);
   src.close();
 
   const db = new DatabaseSync(TEST_DB);
-  db.exec('PRAGMA query_only=ON');
   const city = await geo.geocode(db, 'Chennai', 'IN', NOMINATIM);
   if (!city) throw new Error('Could not geocode Chennai.');
-  console.log(`Chennai: ${city.lat}, ${city.lng}`);
+  console.log(\`Chennai: \${city.lat}, \${city.lng}\`);
 
   const reports = [];
   for (const spec of SEARCHES) {
-    console.log('\n' + spec.q);
+    console.log('\\n' + spec.q);
     const raw = rowsFrom(await overpass(buildQuery(city.lat, city.lng, spec)), spec);
     const rows = fuzzyDedupe(raw);
     await enrichRows(rows);
