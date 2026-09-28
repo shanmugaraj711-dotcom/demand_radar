@@ -1,0 +1,30 @@
+[Unit]
+Description=Demand Radar
+After=network-online.target
+Wants=network-online.target
+
+[Service]
+User=radar
+Group=radar
+WorkingDirectory=/opt/radar/app
+EnvironmentFile=/etc/radar/radar.env
+ExecStart=/opt/radar/node/bin/node --disable-warning=ExperimentalWarning --max-old-space-size=256 server.js
+Restart=on-failure
+RestartSec=5
+# Small server: keep this app from starving the other services on it
+MemoryHigh=380M
+MemoryMax=450M
+TasksMax=64
+# Hardening: it may only write to its own data folder
+NoNewPrivileges=true
+ProtectSystem=strict
+ProtectHome=true
+PrivateTmp=true
+ReadWritePaths=/var/lib/radar
+ProtectKernelTunables=true
+ProtectControlGroups=true
+RestrictAddressFamilies=AF_INET AF_INET6 AF_UNIX
+LockPersonality=true
+
+[Install]
+WantedBy=multi-user.target

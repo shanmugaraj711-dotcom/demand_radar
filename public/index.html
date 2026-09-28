@@ -3,6 +3,13 @@
 <head>
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+<meta name="theme-color" content="#185fa5">
+<meta name="mobile-web-app-capable" content="yes">
+<meta name="apple-mobile-web-app-capable" content="yes">
+<meta name="apple-mobile-web-app-title" content="Radar">
+<link rel="manifest" href="/manifest.webmanifest">
+<link rel="icon" href="/icon.svg" type="image/svg+xml">
+<link rel="apple-touch-icon" href="/apple-touch-icon.png">
 <title>Topic Radar</title>
 <link rel="stylesheet" href="app.css">
 </head>
@@ -17,6 +24,7 @@
     <button data-tab="settings">Settings</button>
   </nav>
   <button class="pill" id="keypill" title="Google Places connection"></button>
+  <button class="pill" id="logout" hidden>Log out</button>
 </header>
 <main id="main">
   <section id="tab-radar" hidden></section>

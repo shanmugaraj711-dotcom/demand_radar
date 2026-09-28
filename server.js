@@ -15,9 +15,10 @@ const enrichLib = require('./lib/enrich');
 const csv = require('./lib/csv');
 const ai = require('./lib/ai');
 const appsLib = require('./lib/apps');
+const auth = require('./lib/auth');
 const { norm, esc } = require('./lib/util');
 
-const MIME = { '.html': 'text/html; charset=utf-8', '.js': 'text/javascript; charset=utf-8', '.css': 'text/css; charset=utf-8', '.svg': 'image/svg+xml', '.png': 'image/png', '.ico': 'image/x-icon' };
+const MIME = { '.html': 'text/html; charset=utf-8', '.js': 'text/javascript; charset=utf-8', '.css': 'text/css; charset=utf-8', '.svg': 'image/svg+xml', '.png': 'image/png', '.ico': 'image/x-icon', '.webmanifest': 'application/manifest+json' };
 
 function createApp(opts = {}) {
   const db = db_.open(opts.dbFile || path.join(__dirname, 'data', 'radar.db'));
@@ -333,7 +334,7 @@ function createApp(opts = {}) {
   route('GET', '/api/state', () => {
     const s = S();
     const q = leadsLib.queue(db, s);
-    return { hasPlaces: !!s.placesKey, hasAnthropic: !!s.anthropicKey, placesUsedToday: db_.usedToday(db, 'places'), placesDailyCap: s.placesDailyCap, due: q.due.length, fresh: q.fresh.length, leads: db.prepare('SELECT COUNT(*) n FROM leads').get().n, node: process.version };
+    return { hasPlaces: !!s.placesKey, hasAnthropic: !!s.anthropicKey, placesUsedToday: db_.usedToday(db, 'places'), placesDailyCap: s.placesDailyCap, due: q.due.length, fresh: q.fresh.length, leads: db.prepare('SELECT COUNT(*) n FROM leads').get().n, node: process.version, auth: AUTH.enabled };
   });
   route('GET', '/api/settings', () => ({ settings: settingsLib.publicView(S()), steps: leadsLib.STEPS }));
   route('PUT', '/api/settings', ({ body }) => { settingsLib.save(db, body); return { settings: settingsLib.publicView(S()) }; });
@@ -431,16 +432,26 @@ function createApp(opts = {}) {
   route('GET', '/api/funnel', () => leadsLib.funnel(db));
 
   /* ------------------------------------------------------------ http */
-  const HOST_OK = /^(localhost|127\.0\.0\.1|\[::1\])(:\d+)?$/;
+  const AUTH = auth.create(db, { pin: opts.pin, allowedHosts: opts.allowedHosts });
   const server = http.createServer(async (req, res) => {
     try {
-      if (!HOST_OK.test(req.headers.host || '')) return send(res, 403, { error: 'Forbidden host' });
+      if (!AUTH.hostOk(req.headers.host)) return send(res, 403, { error: 'Forbidden host' });
       const url = new URL(req.url, 'http://localhost');
+      if (AUTH.enabled && !AUTH.isPublic(url.pathname) && !AUTH.isAuthed(req)) {
+        if (url.pathname.startsWith('/api/')) return send(res, 401, { error: 'Login required', login: true });
+        res.writeHead(302, { Location: '/login.html' });
+        return res.end();
+      }
       if (url.pathname.startsWith('/api/')) {
         if (req.method !== 'GET') {
           const origin = req.headers.origin;
-          if (origin && !HOST_OK.test(origin.replace(/^https?:\/\//, ''))) return send(res, 403, { error: 'Forbidden origin' });
+          if (origin && !AUTH.originOk(origin)) return send(res, 403, { error: 'Forbidden origin' });
         }
+        if (url.pathname === '/api/login' && req.method === 'POST') {
+          const r = AUTH.login(req, res, (await readJson(req)).pin);
+          return send(res, r.status, r.error ? { error: r.error } : { ok: true });
+        }
+        if (url.pathname === '/api/logout' && req.method === 'POST') { AUTH.logout(req, res); return send(res, 200, { ok: true }); }
         const r = routes.find((x) => x.method === req.method && x.re.test(url.pathname));
         if (!r) return send(res, 404, { error: 'Not found' });
         const params = url.pathname.match(r.re).groups || {};
@@ -460,7 +471,7 @@ function createApp(opts = {}) {
     }
   });
 
-  return { server, db, close: () => { server.close(); db.close(); } };
+  return { server, db, auth: AUTH, close: () => { server.close(); db.close(); } };
 }
 
 function httpErr(status, message) { const e = new Error(message); e.status = status; return e; }
@@ -473,13 +484,17 @@ function readJson(req) {
     req.on('error', reject);
   });
 }
+const SECURITY_HEADERS = {
+  'X-Content-Type-Options': 'nosniff', 'X-Frame-Options': 'DENY', 'Referrer-Policy': 'no-referrer',
+  'Content-Security-Policy': "default-src 'self'; img-src 'self' data:; style-src 'self' 'unsafe-inline'; script-src 'self'; connect-src 'self'; manifest-src 'self'; worker-src 'self'; frame-ancestors 'none'; base-uri 'none'; form-action 'self'",
+};
 function serveStatic(p, res) {
   const root = path.join(__dirname, 'public');
   const file = path.normalize(path.join(root, p === '/' ? 'index.html' : p));
   if (!file.startsWith(root)) return send(res, 403, { error: 'Forbidden' });
   fs.readFile(file, (err, data) => {
     if (err) return send(res, 404, { error: 'Not found' });
-    res.writeHead(200, { 'Content-Type': MIME[path.extname(file)] || 'application/octet-stream', 'Cache-Control': 'no-cache' });
+    res.writeHead(200, { 'Content-Type': MIME[path.extname(file)] || 'application/octet-stream', 'Cache-Control': 'no-cache', ...SECURITY_HEADERS });
     res.end(data);
   });
 }
@@ -487,9 +502,21 @@ function serveStatic(p, res) {
 module.exports = { createApp };
 
 if (require.main === module) {
-  const port = +process.env.PORT || 4173;
-  const app = createApp();
-  app.server.listen(port, '127.0.0.1', () => {
-    console.log(`\n  Topic Radar is running:  http://localhost:${port}\n  Data is stored in ${path.join(__dirname, 'data')}\n  Press Ctrl+C to stop.\n`);
+  const port = process.env.PORT !== undefined && process.env.PORT !== '' ? +process.env.PORT : 4173;
+  const host = process.env.HOST || '127.0.0.1';
+  const dbFile = process.env.DATA_DIR ? path.join(process.env.DATA_DIR, 'radar.db') : undefined;
+  const app = createApp({ dbFile });
+  const loopback = ['127.0.0.1', 'localhost', '::1'].includes(host);
+  // Safe by default: never listen beyond this computer, or serve a public hostname, without a login.
+  if ((!loopback || app.auth.remote) && !app.auth.enabled && process.env.ALLOW_NO_PIN !== '1') {
+    console.error('\n  Refusing to start: HOST or ALLOWED_HOSTS allows other computers to connect, but APP_PIN is not set.\n' +
+      '  Set APP_PIN (8+ characters). If something else already protects the app (for example Cloudflare Access), set ALLOW_NO_PIN=1.\n');
+    process.exit(1);
+  }
+  if (app.auth.enabled && String(process.env.APP_PIN || '').length < 8) console.warn('  Warning: APP_PIN is shorter than 8 characters.');
+  app.server.listen(port, host, () => {
+    console.log(`\n  Topic Radar is running:  http://localhost:${app.server.address().port}  (listening on ${host})\n  Login: ${app.auth.enabled ? 'PIN required' : 'off (local only)'}\n  Press Ctrl+C to stop.\n`);
   });
+  const stop = () => { app.close(); process.exit(0); };
+  process.on('SIGTERM', stop); process.on('SIGINT', stop);
 }

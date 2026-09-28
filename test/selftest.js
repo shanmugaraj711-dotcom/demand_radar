@@ -59,6 +59,13 @@ function fakeSite(req, res) {
 }
 
 async function main() {
+  // Live checks need the real internet. Probe first (5 s each) so a blocked network is reported, not waited on for minutes.
+  let live = !(process.argv.includes('--skip-live') || process.env.SKIP_LIVE === '1');
+  if (live) {
+    const probes = ['https://suggestqueries.google.com/complete/search?client=firefox&q=abacus', 'https://duckduckgo.com/ac/?q=abacus&type=list', 'https://api.bing.com/osjson.aspx?query=abacus'];
+    const res = await Promise.all(probes.map((u) => fetch(u, { signal: AbortSignal.timeout(5000) }).then((r) => r.ok).catch(() => false)));
+    if (!res.some(Boolean)) { live = false; console.log('\nNo outbound access to the search endpoints from here. Live keyword checks will be SKIPPED, local checks only.'); }
+  } else console.log('\nLive keyword checks skipped by request. Local checks only.');
   const P = await listen(fakePlaces), N = await listen(fakeNominatim), W = await listen(fakeSite);
   sitePort = W.port;
   const dbFile = path.join(os.tmpdir(), 'topic-radar-test-' + Date.now() + '.db');
@@ -238,7 +245,7 @@ async function main() {
   }
 
   console.log('\nKeywords (REAL network: Google suggest, quick scan, one source)');
-  {
+  if (!live) console.log('  skipped'); else {
     const s = await api('POST', '/api/expand', { seed: 'abacus', country: 'IN', lang: 'en', depth: 'quick', city: 'Chennai', sources: ['google'] });
     let networkOk = true;
     const job = await waitJob(s.body.jobId, 180000);
@@ -279,7 +286,7 @@ async function main() {
   }
 
   console.log('\nAny keyword, many sources (REAL network)');
-  {
+  if (!live) console.log('  skipped'); else {
     const src = (await api('GET', '/api/sources')).body.sources;
     ok(src.length >= 6 && src.filter((s) => s.default).length === 4, 'server lists sources with defaults', src.map((s) => s.id));
     const { fetchOne } = require('../lib/suggest');
@@ -305,7 +312,7 @@ async function main() {
     ok(apps.status === 200 && apps.body.count > 5 && apps.body.apps[0].name && ['open', 'moderate', 'crowded'].includes(apps.body.crowd), 'App Store competitor search returns real apps', apps.body.count);
   }
 
-  console.log(`\n${pass} passed, ${fail} failed`);
+  console.log(`\n${pass} passed, ${fail} failed` + (live ? '' : '. Live network checks NOT run: local checks only.'));
   app.close(); P.s.close(); N.s.close(); W.s.close();
   for (const ext of ['', '-wal', '-shm']) fs.rmSync(dbFile + ext, { force: true });
   process.exit(fail ? 1 : 0);

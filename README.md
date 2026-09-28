@@ -29,12 +29,16 @@ Two ways, use either:
 1. **Google Places API (built in).** Settings → paste your key. Google Cloud Console → enable "Places API (New)" → turn on billing → create a key. Requests are billed by Google, so the app shows an estimate first and stops at a daily cap you set.
 2. **Use an existing scraper and import the CSV.** For example [gosom/google-maps-scraper](https://github.com/gosom/google-maps-scraper) exports name, phone, website, rating and email without an API key. Leads → Import CSV. Column names from Outscraper, Apify and similar exports are recognised. Check the tool's and Google's terms before scraping.
 
+## Use it on a phone (PWA) and put it on a server
+
+The app is installable ("Add to Home Screen"), has a phone layout with a bottom tab bar, asks "Did you send it?" when you come back from WhatsApp, and can save a lead as a phone contact. To run it on a server behind a login, set `APP_PIN` and `ALLOWED_HOSTS` (the app refuses to listen beyond localhost without a PIN). Step-by-step for AWS Amazon Linux + Cloudflare Tunnel: [deploy/DEPLOY.md](deploy/DEPLOY.md).
+
 ## Rules the app keeps
 
 - It never sends a message for you. WhatsApp opens with the text filled in; you press send.
 - It uses a neutral greeting until you know the person's name.
 - Score is a ranking aid, not a prediction. The keyword score shows how strongly search engines suggest a phrase. It is **not** monthly search volume.
-- Keys and data stay on your computer (`data/`). The server only listens on `localhost`.
+- Keys and data stay on your computer (`data/`). By default the server only listens on `localhost`; it will not listen wider, or serve a public hostname, without a PIN.
 
 ## Optional
 
@@ -46,7 +50,7 @@ Two ways, use either:
 npm test
 ```
 
-Runs the whole stack. Google Places, the geocoder and websites are faked locally; keyword collection uses the real network.
+Runs login/security checks, then the whole stack. Google Places, the geocoder and websites are faked locally; keyword collection uses the real network. If the real network is blocked, the live part is detected in 5 seconds and skipped, and the summary says so. `npm run test:local` skips the live part on purpose; `npm run probe` shows which keyword sources this machine can reach.
 
 ## Known limits
 

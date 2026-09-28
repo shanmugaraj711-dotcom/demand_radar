@@ -1,0 +1,15 @@
+[Unit]
+Description=Demand Radar database backup
+
+[Service]
+Type=oneshot
+User=radar
+Group=radar
+WorkingDirectory=/opt/radar/app
+EnvironmentFile=/etc/radar/radar.env
+ExecStart=/opt/radar/node/bin/node --disable-warning=ExperimentalWarning tools/backup.js
+ProtectSystem=strict
+ProtectHome=true
+PrivateTmp=true
+NoNewPrivileges=true
+ReadWritePaths=/var/lib/radar

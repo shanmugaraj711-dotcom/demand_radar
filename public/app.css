@@ -141,3 +141,21 @@ table.t th{font-weight:500;color:var(--mute);font-size:13px;border-top:0}
 .spinner{display:inline-block;width:14px;height:14px;border:2px solid var(--line);border-top-color:var(--acc);border-radius:50%;animation:sp .8s linear infinite;vertical-align:-2px}
 @keyframes sp{to{transform:rotate(360deg)}}
 @media (prefers-reduced-motion:reduce){*{animation:none!important;transition:none!important}}
+
+/* phone layout: bottom tab bar, bigger tap targets */
+@media(max-width:700px){
+  .top{padding:8px 12px;gap:8px}
+  .brand span{display:none}
+  #tabs{position:fixed;left:0;right:0;bottom:0;z-index:30;background:var(--card);border-top:1px solid var(--line);padding:6px 4px calc(6px + env(safe-area-inset-bottom));justify-content:space-around;overflow:visible;gap:0}
+  #tabs button{flex:1;padding:8px 2px;font-size:12px;min-height:48px;text-align:center}
+  .top .pill{margin-left:auto}
+  main{padding:14px 12px calc(90px + env(safe-area-inset-bottom))}
+  .btn{min-height:44px}.btn.sm{min-height:40px}
+  .act .outcomes .btn{flex:1 1 44%}
+  .act textarea{min-height:150px;font-size:16px}
+  input[type=text],input[type=search],input[type=password],input[type=number],select,textarea{font-size:16px}
+  .drawer{width:100%}
+  .stage{grid-template-columns:96px 1fr 64px}
+  #toast{bottom:calc(84px + env(safe-area-inset-bottom))}
+  .lead{grid-template-columns:1fr}
+}

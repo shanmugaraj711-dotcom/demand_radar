@@ -1,0 +1,10 @@
+[Unit]
+Description=Daily Demand Radar backup
+
+[Timer]
+OnCalendar=*-*-* 03:15:00
+RandomizedDelaySec=600
+Persistent=true
+
+[Install]
+WantedBy=timers.target

@@ -25,6 +25,7 @@ async function api(method, url, body) {
   try { r = await fetch(url, { method, headers: { 'Content-Type': 'application/json' }, body: body === undefined ? undefined : JSON.stringify(body) }); }
   catch { throw new Error('Cannot reach the Topic Radar server. Is it still running?'); }
   const j = await r.json().catch(() => ({}));
+  if (r.status === 401 && j.login) { location.href = '/login.html'; throw new Error('Login required'); }
   if (!r.ok) throw new Error(j.error || `Request failed (${r.status})`);
   return j;
 }
@@ -93,6 +94,7 @@ async function refreshState() {
     S.state = await api('GET', '/api/state');
     const b = $('#qbadge'), n = S.state.due;
     b.hidden = !n; b.textContent = n;
+    $('#logout').hidden = !S.state.auth;
     const p = $('#keypill');
     p.className = 'pill ' + (S.state.hasPlaces ? 'ok' : 'warn');
     p.textContent = S.state.hasPlaces ? `Maps ✓  ${S.state.placesUsedToday}/${S.state.placesDailyCap} today` : 'Add Google Maps key';
@@ -113,6 +115,26 @@ function go(tab) {
 }
 document.querySelectorAll('#tabs button').forEach((b) => b.addEventListener('click', () => go(b.getAttribute('data-tab'))));
 $('#keypill').addEventListener('click', () => go('settings'));
+$('#logout').addEventListener('click', async () => { try { await api('POST', '/api/logout'); } catch { /* ignore */ } location.href = '/login.html'; });
+
+// Coming back from WhatsApp: ask once whether the message was sent, so the follow-up schedule stays accurate.
+document.addEventListener('visibilitychange', () => {
+  if (document.visibilityState !== 'visible' || !S.waPending) return;
+  const p = S.waPending; S.waPending = null;
+  if (!p.box.isConnected) return;
+  const banner = h('div', { class: 'notice info', style: 'margin-top:10px' }, `Did you send the message to ${p.lead.name}? `,
+    h('button', { class: 'btn sm pri', on: { click: () => p.ev('sent') } }, 'Yes, sent'), ' ', h('button', { class: 'btn sm', on: { click: () => banner.remove() } }, 'Not yet'));
+  p.box.append(banner);
+});
+
+// A contact card, so WhatsApp and the dialer show the business name instead of a bare number.
+function saveContact(lead) {
+  const clean = (x) => String(x || '').replace(/[\r\n;,]/g, ' ').trim();
+  const tel = lead.wa ? '+' + lead.wa : clean(lead.phone);
+  const vcf = ['BEGIN:VCARD', 'VERSION:3.0', 'FN:' + clean(lead.name), 'ORG:' + clean(lead.name), 'TEL;TYPE=CELL:' + tel, lead.website ? 'URL:' + clean(lead.website) : '', 'END:VCARD'].filter(Boolean).join('\r\n');
+  const a = h('a', { href: URL.createObjectURL(new Blob([vcf], { type: 'text/vcard' })), download: clean(lead.name).slice(0, 40) + '.vcf' });
+  document.body.append(a); a.click(); a.remove();
+}
 
 /* ================================================================ RADAR */
 const R = { apps: null, searchId: null, data: null, rows: [], selected: new Set(), f: { q: '', intent: '', term: [], place: '', exclude: '', hideFringe: false, minSources: 1, sort: 'score', band: '' }, ai: null, busy: false };
@@ -502,7 +524,7 @@ function actionCard(item, onDone) {
     clear(box);
     const ta = h('textarea', { rows: 6, spellcheck: 'false', 'aria-label': 'Message text' }, a.text);
     const isCall = a.channel === 'call';
-    const waBtn = h('a', { class: 'btn pri', href: '#', target: '_blank', rel: 'noopener', on: { click: (e) => { e.currentTarget.href = `https://wa.me/${lead.wa}?text=${encodeURIComponent(ta.value)}`; } } }, 'Open WhatsApp');
+    const waBtn = h('a', { class: 'btn pri', href: '#', target: '_blank', rel: 'noopener', on: { click: (e) => { e.currentTarget.href = `https://wa.me/${lead.wa}?text=${encodeURIComponent(ta.value)}`; S.waPending = { box, lead, ev: (x) => ev(x) }; } } }, 'Open WhatsApp');
     const ev = async (ev, extra = {}) => {
       try {
         const r = await api('POST', `/api/leads/${lead.id}/event`, { ev, body: ev === 'sent' ? ta.value : undefined, lang: a.lang, ...extra });
@@ -527,7 +549,7 @@ function actionCard(item, onDone) {
       h('div', { class: 'row', style: 'margin-top:8px' }, h('span', { class: 'tag acc' }, a.label), h('span', { class: 'small mute' }, a.hint), h('span', { style: 'flex:1' }), isCall ? null : [lang('en', 'EN'), lang('ta', 'தமிழ்')]),
       ta,
       h('div', { class: 'row' }, isCall ? null : (lead.wa ? waBtn : h('span', { class: 'small mute' }, 'No WhatsApp number')), btn(isCall ? 'Copy script' : 'Copy', async () => { try { await navigator.clipboard.writeText(ta.value); toast('Copied.'); } catch { ta.select(); toast('Press Ctrl+C to copy.'); } }),
-        a.tel ? h('a', { class: 'btn', href: a.tel }, 'Call') : null, isCall && lead.wa ? h('a', { class: 'btn', href: `https://wa.me/${lead.wa}`, target: '_blank', rel: 'noopener' }, 'Open chat') : null,
+        a.tel ? h('a', { class: 'btn', href: a.tel }, 'Call') : null, lead.phone ? btn('Save contact', () => saveContact(lead)) : null, isCall && lead.wa ? h('a', { class: 'btn', href: `https://wa.me/${lead.wa}`, target: '_blank', rel: 'noopener' }, 'Open chat') : null,
         h('button', { class: 'btn sm', on: { click: () => openLead(lead.id) } }, 'Details')),
       h('div', { class: 'outcomes' }, oc));
   };
@@ -630,6 +652,8 @@ async function loadSettings() {
   await refreshState();
   try { const { steps } = await api('GET', '/api/settings'); S.steps = steps; } catch { /* ignore */ }
   const t = location.hash.slice(1);
-  go(views[t] ? t : 'radar');
+  const phone = window.matchMedia('(max-width: 700px)').matches;
+  go(views[t] ? t : phone && S.state && S.state.leads ? 'queue' : 'radar');
+  if ('serviceWorker' in navigator) navigator.serviceWorker.register('/sw.js').catch(() => {});
   setInterval(refreshState, 60000);
 })();
