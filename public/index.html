@@ -1,0 +1,32 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+<title>Topic Radar</title>
+<link rel="stylesheet" href="app.css">
+</head>
+<body>
+<header class="top">
+  <div class="brand"><svg width="22" height="22" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" aria-hidden="true"><circle cx="12" cy="12" r="9"/><circle cx="12" cy="12" r="4.5"/><path d="M12 12l6-6"/></svg><span>Topic Radar</span></div>
+  <nav id="tabs" aria-label="Sections">
+    <button data-tab="radar">Radar</button>
+    <button data-tab="leads">Leads</button>
+    <button data-tab="queue">Follow-ups <span class="badge" id="qbadge" hidden></span></button>
+    <button data-tab="funnel">Funnel</button>
+    <button data-tab="settings">Settings</button>
+  </nav>
+  <button class="pill" id="keypill" title="Google Places connection"></button>
+</header>
+<main id="main">
+  <section id="tab-radar" hidden></section>
+  <section id="tab-leads" hidden></section>
+  <section id="tab-queue" hidden></section>
+  <section id="tab-funnel" hidden></section>
+  <section id="tab-settings" hidden></section>
+</main>
+<aside id="drawer" class="drawer" hidden aria-label="Lead details"></aside>
+<div id="toast" role="status" aria-live="polite"></div>
+<script src="app.js"></script>
+</body>
+</html>

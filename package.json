@@ -1,0 +1,11 @@
+{
+  "name": "topic-radar",
+  "version": "1.0.0",
+  "description": "Find what people search for, find the businesses that serve it, and follow up one by one.",
+  "private": true,
+  "engines": { "node": ">=22.5" },
+  "scripts": {
+    "start": "node --disable-warning=ExperimentalWarning server.js",
+    "test": "node --disable-warning=ExperimentalWarning test/selftest.js"
+  }
+}
