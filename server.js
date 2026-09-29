@@ -16,6 +16,7 @@ const csv = require('./lib/csv');
 const ai = require('./lib/ai');
 const appsLib = require('./lib/apps');
 const auth = require('./lib/auth');
+const demand = require('./lib/demand');
 const { norm, esc } = require('./lib/util');
 
 const MIME = { '.html': 'text/html; charset=utf-8', '.js': 'text/javascript; charset=utf-8', '.css': 'text/css; charset=utf-8', '.svg': 'image/svg+xml', '.png': 'image/png', '.ico': 'image/x-icon', '.webmanifest': 'application/manifest+json' };
@@ -334,9 +335,54 @@ function createApp(opts = {}) {
   route('GET', '/api/state', () => {
     const s = S();
     const q = leadsLib.queue(db, s);
-    return { hasPlaces: !!s.placesKey, hasAnthropic: !!s.anthropicKey, placesUsedToday: db_.usedToday(db, 'places'), placesDailyCap: s.placesDailyCap, due: q.due.length, fresh: q.fresh.length, leads: db.prepare('SELECT COUNT(*) n FROM leads').get().n, node: process.version, auth: AUTH.enabled };
+    return { demandSignals: db.prepare('SELECT COUNT(*) n FROM demand_signals').get().n, opportunities: db.prepare("SELECT COUNT(*) n FROM lead_opportunities WHERE status='unreviewed'").get().n, hasPlaces: !!s.placesKey, hasAnthropic: !!s.anthropicKey, placesUsedToday: db_.usedToday(db, 'places'), placesDailyCap: s.placesDailyCap, due: q.due.length, fresh: q.fresh.length, leads: db.prepare('SELECT COUNT(*) n FROM leads').get().n, node: process.version, auth: AUTH.enabled };
   });
   route('GET', '/api/settings', () => ({ settings: settingsLib.publicView(S()), steps: leadsLib.STEPS }));
+  route('GET', '/api/demand/signals', ({ query }) => {
+    const limit = Math.min(200, Math.max(1, +query.limit || 50));
+    const rows = db.prepare('SELECT * FROM demand_signals ORDER BY id DESC LIMIT ?').all(limit);
+    return { total: db.prepare('SELECT COUNT(*) n FROM demand_signals').get().n, rows };
+  });
+  route('POST', '/api/demand/signals', ({ body }) => {
+    let result;
+    try { result = demand.insertSignal(db, body || {}); } catch (e) { throw httpErr(400, e.message); }
+    const matches = demand.resolve(db, result.signal, 5);
+    const opportunities = [];
+    if (result.inserted) {
+      for (const m of matches.filter((x) => x.match_status === 'matched')) {
+        const id = demand.createOpportunity(db, result.id, {
+          lead_id: m.lead_id, leadReason: result.signal.detected_need || result.signal.intent_class || 'demand signal',
+          confidence: m.confidence, reasons: m.reasons, distance_km: m.distance_km,
+          signalSource: result.signal.source, sourceUrl: result.signal.source_url,
+          observedAt: result.signal.observed_at, rawText: result.signal.raw_text
+        });
+        opportunities.push({ id, lead_id: m.lead_id, confidence: m.confidence, reasons: m.reasons });
+      }
+    }
+    return { ...result, matches, opportunities };
+  });
+  route('POST', '/api/demand/signals/:id/resolve', ({ params }) => {
+    const signal = db.prepare('SELECT * FROM demand_signals WHERE id=?').get(+params.id);
+    if (!signal) throw httpErr(404, 'Demand signal not found');
+    const matches = demand.resolve(db, signal, 5);
+    const opportunities = [];
+    for (const m of matches.filter((x) => x.match_status === 'matched')) {
+      const id = demand.createOpportunity(db, signal.id, {
+        lead_id: m.lead_id, leadReason: signal.detected_need || signal.intent_class || 'demand signal',
+        confidence: m.confidence, reasons: m.reasons, distance_km: m.distance_km,
+        signalSource: signal.source, sourceUrl: signal.source_url,
+        observedAt: signal.observed_at, rawText: signal.raw_text
+      });
+      opportunities.push({ id, lead_id: m.lead_id, confidence: m.confidence, reasons: m.reasons });
+    }
+    return { signal, matches, opportunities };
+  });
+  route('GET', '/api/demand/opportunities', ({ query }) => {
+    const limit = Math.min(200, Math.max(1, +query.limit || 50));
+    const rows = db.prepare("SELECT o.*, d.source, d.source_url, d.raw_text, d.entity_name, d.location_hint, d.detected_need, d.intent_class, d.confidence_score FROM lead_opportunities o JOIN demand_signals d ON d.id=o.demand_signal_id ORDER BY o.updated_at DESC LIMIT ?").all(limit);
+    return { total: db.prepare('SELECT COUNT(*) n FROM lead_opportunities').get().n, rows };
+  });
+
   route('PUT', '/api/settings', ({ body }) => { settingsLib.save(db, body); return { settings: settingsLib.publicView(S()) }; });
 
   route('GET', '/api/sources', () => ({ sources: Object.entries(suggest.SOURCES).map(([id, x]) => ({ id, label: x.label, default: suggest.DEFAULT_SOURCES.includes(id) })) }));
