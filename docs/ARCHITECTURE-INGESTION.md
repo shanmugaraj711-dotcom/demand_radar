@@ -241,3 +241,46 @@ All extraction evidence, provenance tokens, and explainability records are retur
 | **Mandatory human gate** | All ingested opportunities default to `'unreviewed'` and block messaging. |
 | **Strict privacy** | Email addresses, phone numbers, and secrets are sanitized and redacted. |
 | **Deterministic deduplication** | SHA-256 content hash guarantees zero duplicate signals in database. |
+
+---
+
+## 9. Phase 4: Public Demand Source — Reddit RSS Adapter (`lib/reddit-rss.js`)
+
+Phase 4 introduces the first real public demand source adapter using Reddit's public RSS/Atom feeds (`.rss` endpoints for subreddits and search queries).
+
+```
+Reddit Public RSS / Atom Feed (HTTPS)
+    ↓
+RedditRssAdapter (lib/reddit-rss.js)
+    ↓
+XML/Atom Parser & HTML Sanitizer (Dependency-Free, Safe)
+    ↓
+Normalized Mentions (lib/normalization.js)
+    ↓
+Audited Entity & Demand Extraction (lib/extraction.js)
+    ↓
+Content-Hash Deduplication & Demand Signals (lib/ingestion.js)
+    ↓
+Product Relevance Engine & Opportunity Gate (status = 'unreviewed')
+```
+
+### Key Components
+
+1. **`RedditRssAdapter` (extends `SourceAdapter`)**:
+   - Accepts configured RSS URLs or query options (subreddit, search query, sort, limit).
+   - Generates compliant `https://www.reddit.com/.../.rss` endpoints.
+   - Normalizes feed entries to standard `Mention` records with `source: 'reddit'`, source ID (Reddit fullname / entry ID), canonical permalink, cleaned raw text (title + selftext/description), author, and subreddit location hint.
+
+2. **Security & SSRF Safeguards**:
+   - **HTTPS Enforcement**: Only `https://` URLs are permitted.
+   - **Strict Host Whitelist**: Restricts requests strictly to `reddit.com`, `www.reddit.com`, `old.reddit.com`, and `np.reddit.com`.
+   - **SSRF Protection**: Explicitly forbids loopback/private IPs, credentials in URL (`user:pass@`), and non-standard ports.
+   - **HTTP Redirect Rejection**: Native fetch enforces `redirect: 'error'`, strictly rejecting 3xx redirects to prevent SSRF redirection to internal network or cloud metadata services.
+   - **Byte Caps & Timeouts**: Defaults to 1 MB maximum response payload and 10-second request timeout to prevent denial-of-service from runaway or oversized responses.
+   - **Safe XML/Atom Parsing**: Dependency-free regex/tag parser without entity resolution (XXE immune).
+
+3. **Orchestration & API Endpoint**:
+   - `ingestRedditRss(db, queryOrUrl, options)`: Orchestrates fetching, normalization, extraction, and ingestion into the database.
+   - `POST /api/demand/sources/reddit`: Authenticated endpoint allowing authorized operators to trigger on-demand Reddit RSS ingestion with configurable query or URL parameters.
+   - **Execution Model**: Manual, on-demand execution only. No background daemons, cron jobs, or automated polling loops are introduced.
+   - **Human Confirmation Gate**: All downstream opportunities created remain in `'unreviewed'` status, strictly barring outreach until verified by an operator.
