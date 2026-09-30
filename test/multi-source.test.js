@@ -568,6 +568,40 @@ async function runMultiSourceTestSuite() {
       const xData = JSON.parse(xApiRes.body);
       assert.strictEqual(xData.source, 'x');
       assert.strictEqual(xData.total, 1);
+
+      // 7. Client cannot inject server-side allow-lists for generic Web/RSS.
+      const webHostInjection = await makeRequest(
+        port,
+        'POST',
+        '/api/demand/sources/web',
+        { url: 'https://attacker.example.com/page', allowedHosts: ['attacker.example.com'] },
+        cookie
+      );
+      assert.strictEqual(webHostInjection.status, 503);
+      assert.match(webHostInjection.body, /server-side hostname allow-list/i);
+
+      // 8. Client cannot inject API credentials for a credentialed source.
+      // X has an internal test fetch function, so exercise YouTube without one.
+      const youtubeCredentialInjection = await makeRequest(
+        port,
+        'POST',
+        '/api/demand/sources/youtube',
+        { query: 'test', apiKey: 'client-supplied-secret' },
+        cookie
+      );
+      assert.strictEqual(youtubeCredentialInjection.status, 503);
+      assert.match(youtubeCredentialInjection.body, /YouTube source is not configured/i);
+
+      // 9. Approval-gated platforms remain disabled even if a client supplies a token.
+      const linkedinCredentialInjection = await makeRequest(
+        port,
+        'POST',
+        '/api/demand/sources/linkedin',
+        { query: 'test', accessToken: 'client-supplied-secret' },
+        cookie
+      );
+      assert.strictEqual(linkedinCredentialInjection.status, 403);
+      assert.match(linkedinCredentialInjection.body, /pending required platform approval/i);
     } finally {
       srv.server.close();
     }
