@@ -27,6 +27,7 @@ function createApp(opts = {}) {
   const S = () => settingsLib.load(db);
   const kwMemo = new Map();
   const checkingPlaces = new Set();
+  let currentRequest = null;
 
   /* ------------------------------------------------------------ keywords */
   const cache = { get: (k) => db_.cacheGet(db, k), set: (k, v) => db_.cacheSet(db, k, v, 14 * 864e5) };
@@ -377,6 +378,23 @@ function createApp(opts = {}) {
     }
     return { signal, matches, opportunities };
   });
+  route('POST', '/api/demand/opportunities/:id/confirm', ({ params }) => {
+    const actor = AUTH.actor(currentRequest);
+    if (!actor) throw httpErr(401, 'Authenticated user required.');
+    try { return demand.confirmOpportunity(db, +params.id, actor); } catch (e) { throw httpErr(400, e.message); }
+  });
+  route('POST', '/api/demand/opportunities/:id/reject', ({ params }) => {
+    const actor = AUTH.actor(currentRequest);
+    if (!actor) throw httpErr(401, 'Authenticated user required.');
+    try { return demand.rejectOpportunity(db, +params.id, actor); } catch (e) { throw httpErr(400, e.message); }
+  });
+  route('POST', '/api/demand/opportunities/:id/action', ({ params, body }) => {
+    const opportunity = db.prepare('SELECT * FROM lead_opportunities WHERE id=?').get(+params.id);
+    if (!opportunity) throw httpErr(404, 'Opportunity not found');
+    const leadRow = db.prepare('SELECT * FROM leads WHERE id=?').get(opportunity.lead_id);
+    if (!leadRow) throw httpErr(404, 'Lead not found');
+    return messages.action({ ...leadsLib.hydrate(leadRow), lang: body.lang || leadRow.lang }, S(), body.step, opportunity);
+  });
   route('GET', '/api/demand/opportunities', ({ query }) => {
     const limit = Math.min(200, Math.max(1, +query.limit || 50));
     const rows = db.prepare("SELECT o.*, d.source, d.source_url, d.raw_text, d.entity_name, d.location_hint, d.detected_need, d.intent_class, d.confidence_score FROM lead_opportunities o JOIN demand_signals d ON d.id=o.demand_signal_id ORDER BY o.updated_at DESC LIMIT ?").all(limit);
@@ -503,7 +521,9 @@ function createApp(opts = {}) {
         const params = url.pathname.match(r.re).groups || {};
         const query = Object.fromEntries(url.searchParams);
         const body = ['POST', 'PUT', 'PATCH'].includes(req.method) ? await readJson(req) : {};
-        const out = await r.fn({ params, query, body });
+        currentRequest = req;
+        let out;
+        try { out = await r.fn({ params, query, body }); } finally { currentRequest = null; }
         if (out && out.csv !== undefined) {
           res.writeHead(200, { 'Content-Type': 'text/csv; charset=utf-8', 'Content-Disposition': `attachment; filename="${out.filename}"` });
           return res.end('﻿' + out.csv);
