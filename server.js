@@ -27,7 +27,6 @@ function createApp(opts = {}) {
   const S = () => settingsLib.load(db);
   const kwMemo = new Map();
   const checkingPlaces = new Set();
-  let currentRequest = null;
 
   /* ------------------------------------------------------------ keywords */
   const cache = { get: (k) => db_.cacheGet(db, k), set: (k, v) => db_.cacheSet(db, k, v, 14 * 864e5) };
@@ -378,13 +377,13 @@ function createApp(opts = {}) {
     }
     return { signal, matches, opportunities };
   });
-  route('POST', '/api/demand/opportunities/:id/confirm', ({ params }) => {
-    const actor = AUTH.actor(currentRequest);
+  route('POST', '/api/demand/opportunities/:id/confirm', ({ params, req }) => {
+    const actor = AUTH.actor(req);
     if (!actor) throw httpErr(401, 'Authenticated user required.');
     try { return demand.confirmOpportunity(db, +params.id, actor); } catch (e) { throw httpErr(400, e.message); }
   });
-  route('POST', '/api/demand/opportunities/:id/reject', ({ params }) => {
-    const actor = AUTH.actor(currentRequest);
+  route('POST', '/api/demand/opportunities/:id/reject', ({ params, req }) => {
+    const actor = AUTH.actor(req);
     if (!actor) throw httpErr(401, 'Authenticated user required.');
     try { return demand.rejectOpportunity(db, +params.id, actor); } catch (e) { throw httpErr(400, e.message); }
   });
@@ -521,9 +520,7 @@ function createApp(opts = {}) {
         const params = url.pathname.match(r.re).groups || {};
         const query = Object.fromEntries(url.searchParams);
         const body = ['POST', 'PUT', 'PATCH'].includes(req.method) ? await readJson(req) : {};
-        currentRequest = req;
-        let out;
-        try { out = await r.fn({ params, query, body }); } finally { currentRequest = null; }
+        const out = await r.fn({ params, query, body, req });
         if (out && out.csv !== undefined) {
           res.writeHead(200, { 'Content-Type': 'text/csv; charset=utf-8', 'Content-Disposition': `attachment; filename="${out.filename}"` });
           return res.end('﻿' + out.csv);
