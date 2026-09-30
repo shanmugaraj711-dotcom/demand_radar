@@ -119,6 +119,34 @@ try {
 
   assert.throws(() => db.prepare("UPDATE lead_opportunities SET status='bogus' WHERE id=?").run(oppId));
 
+  const formattedOpp = demand.getOpportunity(db, oppId);
+  assert.equal(formattedOpp.id, oppId);
+  assert.equal(formattedOpp.status, 'unreviewed');
+  assert.equal(formattedOpp.confidence, 0.99);
+  assert.equal(formattedOpp.raw_text_excerpt, 'Business A has an operational gap.');
+  assert.deepEqual(formattedOpp.match_reasons, ['test 0.99 confidence']);
+  assert.deepEqual(formattedOpp.candidate, {
+    id: 1003,
+    name: 'Business A Clinic',
+    area: 'Indiranagar',
+    address: '4th Cross, Indiranagar'
+  });
+
+  const confirmedOpp = demand.confirmOpportunity(db, oppId, 'auditor-agent');
+  assert.equal(confirmedOpp.status, 'human_confirmed');
+  assert(confirmedOpp.confirmed_at > 0);
+  assert.equal(confirmedOpp.confirmed_by, 'auditor-agent');
+
+  const unblocked = messages.action(
+    db.prepare('SELECT * FROM leads WHERE id=1003').get(),
+    { templates: { first_en: 'Hi {{name}}' }, sender: '', product: '', topic: '', org: '', link: '', offer: '' },
+    'first',
+    confirmedOpp
+  );
+  assert(!unblocked.blocked);
+  assert(unblocked.text.includes('Business A Clinic'));
+  assert(unblocked.wa.includes('919800000000'));
+
   const h1 = demand.contentHash({
     source: 'social',
     source_url: 'http://example.test/review?id=123',
@@ -140,6 +168,13 @@ try {
   console.log(JSON.stringify({
     adversarial: evidence,
     pre_confirmation: { confidence: 0.99, status: opp.status, outreach: blocked },
+    post_confirmation: {
+      status: confirmedOpp.status,
+      confirmed_at: confirmedOpp.confirmed_at,
+      confirmed_by: confirmedOpp.confirmed_by,
+      outreach_unblocked: !unblocked.blocked,
+      wa_generated: !!unblocked.wa
+    },
     url_ids: { id123_hash: h3, id456_hash: h2, collide: h2 === h3 }
   }, null, 2));
   console.log('demand-safety.test: all checks passed');

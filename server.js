@@ -380,12 +380,18 @@ function createApp(opts = {}) {
   route('POST', '/api/demand/opportunities/:id/confirm', ({ params, req }) => {
     const actor = AUTH.actor(req);
     if (!actor) throw httpErr(401, 'Authenticated user required.');
-    try { return demand.confirmOpportunity(db, +params.id, actor); } catch (e) { throw httpErr(400, e.message); }
+    try {
+      demand.confirmOpportunity(db, +params.id, actor);
+      return demand.getOpportunity(db, +params.id);
+    } catch (e) { throw httpErr(400, e.message); }
   });
   route('POST', '/api/demand/opportunities/:id/reject', ({ params, req }) => {
     const actor = AUTH.actor(req);
     if (!actor) throw httpErr(401, 'Authenticated user required.');
-    try { return demand.rejectOpportunity(db, +params.id, actor); } catch (e) { throw httpErr(400, e.message); }
+    try {
+      demand.rejectOpportunity(db, +params.id, actor);
+      return demand.getOpportunity(db, +params.id);
+    } catch (e) { throw httpErr(400, e.message); }
   });
   route('POST', '/api/demand/opportunities/:id/action', ({ params, body }) => {
     const opportunity = db.prepare('SELECT * FROM lead_opportunities WHERE id=?').get(+params.id);
@@ -394,10 +400,20 @@ function createApp(opts = {}) {
     if (!leadRow) throw httpErr(404, 'Lead not found');
     return messages.action({ ...leadsLib.hydrate(leadRow), lang: body.lang || leadRow.lang }, S(), body.step, opportunity);
   });
+  route('GET', '/api/demand/opportunities/:id', ({ params }) => {
+    const opp = demand.getOpportunity(db, +params.id);
+    if (!opp) throw httpErr(404, 'Opportunity not found');
+    return opp;
+  });
   route('GET', '/api/demand/opportunities', ({ query }) => {
     const limit = Math.min(200, Math.max(1, +query.limit || 50));
-    const rows = db.prepare("SELECT o.*, d.source, d.source_url, d.raw_text, d.entity_name, d.location_hint, d.detected_need, d.intent_class, d.confidence_score FROM lead_opportunities o JOIN demand_signals d ON d.id=o.demand_signal_id ORDER BY o.updated_at DESC LIMIT ?").all(limit);
-    return { total: db.prepare('SELECT COUNT(*) n FROM lead_opportunities').get().n, rows };
+    const status = query.status ? String(query.status) : null;
+    const where = status ? ' WHERE o.status=?' : '';
+    const args = status ? [status, limit] : [limit];
+    const rows = db.prepare(demand.OPPORTUNITY_SELECT + where + ' ORDER BY o.updated_at DESC LIMIT ?').all(...args);
+    const countSql = status ? 'SELECT COUNT(*) n FROM lead_opportunities WHERE status=?' : 'SELECT COUNT(*) n FROM lead_opportunities';
+    const total = db.prepare(countSql).get(...(status ? [status] : [])).n;
+    return { total, rows: rows.map(demand.formatOpportunity) };
   });
 
   route('PUT', '/api/settings', ({ body }) => { settingsLib.save(db, body); return { settings: settingsLib.publicView(S()) }; });
