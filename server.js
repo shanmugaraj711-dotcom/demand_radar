@@ -24,7 +24,7 @@ const { norm, esc } = require('./lib/util');
 const MIME = { '.html': 'text/html; charset=utf-8', '.js': 'text/javascript; charset=utf-8', '.css': 'text/css; charset=utf-8', '.svg': 'image/svg+xml', '.png': 'image/png', '.ico': 'image/x-icon', '.webmanifest': 'application/manifest+json' };
 
 function createApp(opts = {}) {
-  const db = db_.open(opts.dbFile || path.join(__dirname, 'data', 'radar.db'));
+  const db = opts.db || db_.open(opts.dbFile || path.join(__dirname, 'data', 'radar.db'));
   const cfg = { appsBase: opts.appsBase, placesBase: opts.placesBase, nominatimBase: opts.nominatimBase, anthropicBase: opts.anthropicBase };
   const S = () => settingsLib.load(db);
   const kwMemo = new Map();
@@ -396,36 +396,55 @@ function createApp(opts = {}) {
   route('POST', '/api/demand/signals', async ({ body }) => {
     let result;
     try { result = demand.insertSignal(db, body || {}); } catch (e) { throw httpErr(400, e.message); }
-    const matches = demand.resolve(db, result.signal, 5);
-    const opportunities = [];
-    const activeProduct = productsLib.getActiveProduct(db);
-    const productId = body && (body.productId || body.product_id) ? Number(body.productId || body.product_id) : (activeProduct ? activeProduct.id : 1);
-    const product = productsLib.getProductById(db, productId);
 
-    let relevance = null;
-    if (product) {
-      relevance = await relevanceLib.evaluateRelevance(db, product, result.signal);
+    const activeProduct = productsLib.getActiveProduct(db);
+    const hasRequestedId = body && (body.productId != null || body.product_id != null);
+    const productId = hasRequestedId
+      ? Number(body.productId || body.product_id)
+      : (activeProduct ? activeProduct.id : null);
+
+    if (!productId) {
+      throw httpErr(400, 'Product is required: no product_id specified and no active product configured.');
+    }
+    const product = productsLib.getProductById(db, productId);
+    if (!product) {
+      throw httpErr(404, 'Product not found: ' + productId);
     }
 
-    const isRelevant = relevance ? relevance.relevant : true;
-    if (result.inserted && isRelevant) {
+    let relevance = null;
+    try {
+      relevance = await relevanceLib.evaluateRelevance(db, product, result.signal);
+    } catch (e) {
+      relevance = {
+        relevant: false,
+        confidence: 0.0,
+        stage1: { passed: false },
+        stage2: { reason: `Relevance evaluation failed: ${e.message}` }
+      };
+    }
+
+    const matches = demand.resolve(db, result.signal, 5);
+    const opportunities = [];
+
+    // ONLY create opportunity when relevance is strictly relevant === true
+    if (result.inserted && relevance && relevance.relevant === true) {
       for (const m of matches.filter((x) => x.match_status === 'matched')) {
         const id = demand.createOpportunity(db, result.id, {
           lead_id: m.lead_id, leadReason: result.signal.detected_need || result.signal.intent_class || 'demand signal',
-          confidence: relevance ? Math.round(((m.confidence * 0.5) + (relevance.confidence * 0.5)) * 1000) / 1000 : m.confidence,
-          reasons: relevance ? [...m.reasons, `Relevance: ${relevance.stage2.reason}`] : m.reasons,
+          confidence: Math.round(((m.confidence * 0.5) + (relevance.confidence * 0.5)) * 1000) / 1000,
+          reasons: [...m.reasons, `Relevance: ${relevance.stage2.reason}`],
           distance_km: m.distance_km,
           signalSource: result.signal.source, sourceUrl: result.signal.source_url,
           observedAt: result.signal.observed_at, rawText: result.signal.raw_text,
           product_id: productId,
-          relevance: relevance ? {
+          relevance: {
             product_id: productId,
             confidence: relevance.confidence,
             stage1_passed: relevance.stage1.passed,
             matched_need: relevance.stage2.matched_need,
             pitch_angle: relevance.stage2.pitch_angle,
             reason: relevance.stage2.reason
-          } : null
+          }
         });
         opportunities.push({ id, lead_id: m.lead_id, product_id: productId, confidence: m.confidence, reasons: m.reasons });
       }
@@ -435,36 +454,53 @@ function createApp(opts = {}) {
   route('POST', '/api/demand/signals/:id/resolve', async ({ params, body }) => {
     const signal = db.prepare('SELECT * FROM demand_signals WHERE id=?').get(+params.id);
     if (!signal) throw httpErr(404, 'Demand signal not found');
-    const matches = demand.resolve(db, signal, 5);
-    const opportunities = [];
-    const activeProduct = productsLib.getActiveProduct(db);
-    const productId = body && (body.productId || body.product_id) ? Number(body.productId || body.product_id) : (activeProduct ? activeProduct.id : 1);
-    const product = productsLib.getProductById(db, productId);
 
-    let relevance = null;
-    if (product) {
-      relevance = await relevanceLib.evaluateRelevance(db, product, signal);
+    const activeProduct = productsLib.getActiveProduct(db);
+    const hasRequestedId = body && (body.productId != null || body.product_id != null);
+    const productId = hasRequestedId
+      ? Number(body.productId || body.product_id)
+      : (activeProduct ? activeProduct.id : null);
+
+    if (!productId) {
+      throw httpErr(400, 'Product is required: no product_id specified and no active product configured.');
+    }
+    const product = productsLib.getProductById(db, productId);
+    if (!product) {
+      throw httpErr(404, 'Product not found: ' + productId);
     }
 
-    const isRelevant = relevance ? relevance.relevant : true;
-    if (isRelevant) {
+    let relevance = null;
+    try {
+      relevance = await relevanceLib.evaluateRelevance(db, product, signal);
+    } catch (e) {
+      relevance = {
+        relevant: false,
+        confidence: 0.0,
+        stage1: { passed: false },
+        stage2: { reason: `Relevance evaluation failed: ${e.message}` }
+      };
+    }
+
+    const matches = demand.resolve(db, signal, 5);
+    const opportunities = [];
+    if (relevance && relevance.relevant === true) {
       for (const m of matches.filter((x) => x.match_status === 'matched')) {
         const id = demand.createOpportunity(db, signal.id, {
           lead_id: m.lead_id, leadReason: signal.detected_need || signal.intent_class || 'demand signal',
-          confidence: relevance ? Math.round(((m.confidence * 0.5) + (relevance.confidence * 0.5)) * 1000) / 1000 : m.confidence,
-          reasons: relevance ? [...m.reasons, `Relevance: ${relevance.stage2.reason}`] : m.reasons,
+          confidence: Math.round(((m.confidence * 0.5) + (relevance.confidence * 0.5)) * 1000) / 1000,
+          reasons: [...m.reasons, `Relevance: ${relevance.stage2.reason}`],
           distance_km: m.distance_km,
           signalSource: signal.source, sourceUrl: signal.source_url,
           observedAt: signal.observed_at, rawText: signal.raw_text,
           product_id: productId,
-          relevance: relevance ? {
+          relevance: {
             product_id: productId,
             confidence: relevance.confidence,
             stage1_passed: relevance.stage1.passed,
             matched_need: relevance.stage2.matched_need,
             pitch_angle: relevance.stage2.pitch_angle,
             reason: relevance.stage2.reason
-          } : null
+          }
         });
         opportunities.push({ id, lead_id: m.lead_id, product_id: productId, confidence: m.confidence, reasons: m.reasons });
       }
@@ -484,9 +520,16 @@ function createApp(opts = {}) {
     const signal = db.prepare('SELECT * FROM demand_signals WHERE id=?').get(+params.id);
     if (!signal) throw httpErr(404, 'Demand signal not found');
     const activeProduct = productsLib.getActiveProduct(db);
-    const productId = body && (body.productId || body.product_id) ? Number(body.productId || body.product_id) : (activeProduct ? activeProduct.id : 1);
+    const hasRequestedId = body && (body.productId != null || body.product_id != null);
+    const productId = hasRequestedId
+      ? Number(body.productId || body.product_id)
+      : (activeProduct ? activeProduct.id : null);
+
+    if (!productId) {
+      throw httpErr(400, 'Product is required: no product_id specified and no active product configured.');
+    }
     const product = productsLib.getProductById(db, productId);
-    if (!product) throw httpErr(404, 'Product not found');
+    if (!product) throw httpErr(404, 'Product not found: ' + productId);
     const rel = await relevanceLib.evaluateRelevance(db, product, signal, { forceRefresh: Boolean(body && body.forceRefresh) });
     return rel;
   });

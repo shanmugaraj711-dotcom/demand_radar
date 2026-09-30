@@ -423,7 +423,269 @@ async function testPhase2ProductRelevance() {
     assert.strictEqual(eval2.confidence, 0.92, 'Cached confidence must match');
     console.log('    ok - Identical product+signal consumed semantic provider exactly once');
 
-    console.log('\nAll 16 Phase 2 Product Relevance tests passed successfully!\n');
+    // =========================================================================
+    // Test 17: Product-Specific Relevance — APK Conversion vs Web Designer
+    // =========================================================================
+    console.log('  Testing 17. Product-specific relevance: APK conversion vs web designer...');
+    const prodApk = productsLib.createProduct(db, {
+      slug: 'web-to-apk-service',
+      name: 'Website to Android APK Service',
+      description: 'Convert existing responsive websites into Android APK mobile apps with offline cache',
+      topic: 'app conversion',
+      target_org: 'business',
+      target_keywords: ['website', 'apk conversion', 'website to app', 'android apk', 'convert website'],
+      active: false
+    });
+
+    const sigDesigner = demand.insertSignal(db, {
+      source: 'social',
+      source_id: 'sig-designer-17',
+      raw_text: 'Looking for a website designer for my restaurant. Need modern UI and menu layout.',
+      entity_name: 'Spice Garden Restaurant',
+      location_hint: 'Chennai'
+    });
+
+    const relApkDesigner = await relevanceLib.evaluateRelevance(db, prodApk, sigDesigner.signal);
+    assert.strictEqual(relApkDesigner.relevant, false, 'Web design demand must NOT be relevant for APK conversion product');
+    assert(relApkDesigner.confidence <= 0.30, `Confidence must be <= 0.30 (got ${relApkDesigner.confidence})`);
+    assert(relApkDesigner.stage2.reason.includes('Capability mismatch') || relApkDesigner.stage2.reason.includes('not provided') || relApkDesigner.stage2.reason.includes('design'), 'Reason must explicitly cite capability mismatch');
+    console.log('    ok - APK conversion correctly rejected web designer demand (confidence <= 0.30)');
+
+    // =========================================================================
+    // Test 18: Product-Specific Relevance — Kids Abacus App
+    // =========================================================================
+    console.log('  Testing 18. Product-specific relevance: Kids abacus app...');
+    const sigAbacusApp = demand.insertSignal(db, {
+      source: 'social',
+      source_id: 'sig-abacus-app-18',
+      raw_text: 'Looking for an Android app to help my 8-year-old practise abacus at home.',
+      entity_name: 'Alpha Abacus Academy',
+      location_hint: 'Chennai'
+    });
+
+    const relAbacusApp = await relevanceLib.evaluateRelevance(db, prodMath, sigAbacusApp.signal);
+    assert.strictEqual(relAbacusApp.relevant, true, 'Abacus practice app demand MUST be relevant for abacus product');
+    assert(relAbacusApp.confidence >= 0.70, `Confidence must be strong (got ${relAbacusApp.confidence})`);
+    console.log('    ok - Kids abacus app demand confirmed relevant with confidence:', relAbacusApp.confidence);
+
+    // =========================================================================
+    // Test 19: Product-Specific Relevance — Google Ads vs Website Repair
+    // =========================================================================
+    console.log('  Testing 19. Product-specific relevance: Google Ads vs website repair...');
+    const prodBugFix = productsLib.createProduct(db, {
+      slug: 'website-speed-fix',
+      name: 'Website Speed & Bug Fix Service',
+      description: 'Fix broken pages, database errors, and optimize WordPress/HTML website speed for businesses',
+      topic: 'website maintenance',
+      target_org: 'local businesses',
+      target_keywords: ['local business', 'website repair', 'speed optimization', 'bug fix'],
+      active: false
+    });
+
+    const sigGoogleAds = demand.insertSignal(db, {
+      source: 'social',
+      source_id: 'sig-ads-19',
+      raw_text: 'Looking for Google Ads management for my local business. Need PPC search campaign setup.',
+      entity_name: 'Metro Dental Clinic',
+      location_hint: 'Chennai'
+    });
+
+    const relAdsRepair = await relevanceLib.evaluateRelevance(db, prodBugFix, sigGoogleAds.signal);
+    assert.strictEqual(relAdsRepair.relevant, false, 'Google Ads demand must NOT be relevant for website speed & bug fix product');
+    assert(relAdsRepair.confidence <= 0.30, `Confidence must be <= 0.30 (got ${relAdsRepair.confidence})`);
+    assert(relAdsRepair.stage2.reason.includes('Capability mismatch') || relAdsRepair.stage2.reason.includes('advertising') || relAdsRepair.stage2.reason.includes('PPC'), 'Reason must cite capability mismatch');
+    console.log('    ok - Website speed & bug fix correctly rejected Google Ads demand (confidence <= 0.30)');
+
+    // =========================================================================
+    // Test 20: Product-Specific Relevance — Landing Page + WhatsApp Service
+    // =========================================================================
+    console.log('  Testing 20. Product-specific relevance: Landing page + WhatsApp service...');
+    const prodLanding = productsLib.createProduct(db, {
+      slug: 'landing-whatsapp-service',
+      name: 'Landing Page + WhatsApp Service',
+      description: 'High-converting landing page creation with direct WhatsApp enquiry integration for small businesses',
+      topic: 'lead generation',
+      target_org: 'business',
+      target_keywords: ['landing page', 'whatsapp enquiries', 'lead funnel', 'whatsapp booking'],
+      active: false
+    });
+
+    const sigLanding = demand.insertSignal(db, {
+      source: 'social',
+      source_id: 'sig-landing-20',
+      raw_text: 'Need a landing page with WhatsApp enquiries for my coaching business.',
+      entity_name: 'Alpha Coaching',
+      location_hint: 'Chennai'
+    });
+
+    const relLanding = await relevanceLib.evaluateRelevance(db, prodLanding, sigLanding.signal);
+    assert.strictEqual(relLanding.relevant, true, 'Landing page + WhatsApp demand MUST be relevant for landing page service');
+    assert(relLanding.confidence >= 0.70, `Confidence must be strong (got ${relLanding.confidence})`);
+    console.log('    ok - Landing page + WhatsApp service confirmed relevant with confidence:', relLanding.confidence);
+
+    // =========================================================================
+    // Test 21: Invariant — Generic Words Alone Cannot Establish Relevance
+    // =========================================================================
+    console.log('  Testing 21. Invariant: Generic words alone cannot establish relevance...');
+    const prodGeneric = productsLib.createProduct(db, {
+      slug: 'business-solutions-pro',
+      name: 'Business Solutions Service',
+      description: 'Providing business solutions, service management, and customer support for companies',
+      topic: 'business services',
+      target_org: 'company',
+      target_keywords: ['business', 'service', 'solutions', 'customer support'],
+      active: false
+    });
+
+    const sigGeneric = demand.insertSignal(db, {
+      source: 'social',
+      source_id: 'sig-generic-21',
+      raw_text: 'Need a good business service solution for my customer company.',
+      entity_name: 'Generic Corp',
+      location_hint: 'Chennai'
+    });
+
+    const relGeneric = await relevanceLib.evaluateRelevance(db, prodGeneric, sigGeneric.signal);
+    assert.strictEqual(relGeneric.relevant, false, 'Generic words alone must NEVER establish relevance');
+    assert(relGeneric.confidence <= 0.30, `Confidence must be <= 0.30 (got ${relGeneric.confidence})`);
+    assert(relGeneric.stage2.reason.includes('Generic words') || relGeneric.stage2.reason.includes('generic terms'), 'Reason must explicitly cite generic terms');
+    console.log('    ok - Generic words correctly rejected with confidence <= 0.30');
+
+    // =========================================================================
+    // Test 22: Cache Invalidation on Product Definition Changes
+    // =========================================================================
+    console.log('  Testing 22. Cache invalidation on product definition update...');
+    // 1. Evaluate Product A (Math) + Signal X (sigAbacusApp)
+    const initialEvalA = await relevanceLib.evaluateRelevance(db, prodMath, sigAbacusApp.signal);
+    assert.strictEqual(initialEvalA.relevant, true);
+
+    // 2. Verify cached
+    const cachedEvalA = await relevanceLib.evaluateRelevance(db, prodMath, sigAbacusApp.signal);
+    assert.strictEqual(cachedEvalA.cached, true, 'Must be cached on repeat call');
+
+    // Also evaluate Product B (Yoga) + YogaSignal to establish cache for B
+    const initialEvalB = await relevanceLib.evaluateRelevance(db, prodYoga, yogaSignal.signal);
+    assert.strictEqual(initialEvalB.relevant, true);
+    const cachedEvalB1 = await relevanceLib.evaluateRelevance(db, prodYoga, yogaSignal.signal);
+    assert.strictEqual(cachedEvalB1.cached, true, 'Product B must be cached');
+
+    // 3. Update Product A definition (change description & keywords to completely different domain)
+    productsLib.updateProduct(db, prodMath.id, {
+      description: 'Exclusive robotics and artificial intelligence hardware lab for high schools',
+      topic: 'robotics hardware',
+      target_keywords: ['robotics', 'ai hardware', 'arduino']
+    });
+
+    // Fetch refreshed prodMath
+    const updatedProdMath = productsLib.getProductById(db, prodMath.id);
+
+    // 4. Evaluate Product A again
+    const postUpdateEvalA = await relevanceLib.evaluateRelevance(db, updatedProdMath, sigAbacusApp.signal);
+    assert.strictEqual(postUpdateEvalA.cached, false, 'Product A old cache MUST NOT be returned after product definition update');
+    assert.strictEqual(postUpdateEvalA.relevant, false, 'Updated Product A (robotics) is no longer relevant for abacus signal');
+
+    // 5. Verify Product B cache is completely untouched
+    const cachedEvalB2 = await relevanceLib.evaluateRelevance(db, prodYoga, yogaSignal.signal);
+    assert.strictEqual(cachedEvalB2.cached, true, 'Product B cache must remain intact and cached');
+    assert.strictEqual(cachedEvalB2.relevant, true, 'Product B result must remain untouched');
+    console.log('    ok - Product A cache invalidated on update while Product B cache remained intact');
+
+    // =========================================================================
+    // Test 23: API-Level Route Tests (No Relevance Bypass Fallback)
+    // =========================================================================
+    console.log('  Testing 23. API-level enforcement: No relevance bypass...');
+    const { createApp } = require('../server');
+    const http = require('http');
+
+    const app = createApp({ dbFile: testDbFile, pin: '', allowedHosts: 'localhost' });
+    const serverPort = await new Promise((resolve) => {
+      app.server.listen(0, '127.0.0.1', () => resolve(app.server.address().port));
+    });
+
+    const apiCall = (p, method = 'GET', body = null) => new Promise((resolve, reject) => {
+      const r = http.request({
+        host: '127.0.0.1',
+        port: serverPort,
+        path: p,
+        method,
+        headers: {
+          'Host': 'localhost',
+          ...(body ? { 'Content-Type': 'application/json' } : {})
+        }
+      }, (res) => {
+        let t = '';
+        res.on('data', (c) => (t += c));
+        res.on('end', () => {
+          let j;
+          try { j = JSON.parse(t); } catch { j = t; }
+          resolve({ status: res.statusCode, body: j });
+        });
+      });
+      r.on('error', reject);
+      if (body) r.write(JSON.stringify(body));
+      r.end();
+    });
+
+    try {
+      // Deactivate all products in a temporary scratch DB to test missing product error
+      const noProdDbFile = path.join(tmpDir, `no-prod-${Date.now()}.db`);
+      const noProdDb = db_.open(noProdDbFile, { autoMigrate: false });
+      noProdDb.prepare('DELETE FROM products').run();
+      const noProdApp = createApp({ db: noProdDb, pin: '', allowedHosts: 'localhost' });
+      const noProdPort = await new Promise(res => noProdApp.server.listen(0, '127.0.0.1', () => res(noProdApp.server.address().port)));
+
+      const missingProdCall = await new Promise((resolve, reject) => {
+        const r = http.request({
+          host: '127.0.0.1',
+          port: noProdPort,
+          path: '/api/demand/signals',
+          method: 'POST',
+          headers: { 'Host': 'localhost', 'Content-Type': 'application/json' }
+        }, (res) => {
+          let t = ''; res.on('data', c => t += c);
+          res.on('end', () => { try { resolve({ status: res.statusCode, body: JSON.parse(t) }); } catch { resolve({ status: res.statusCode, body: t }); } });
+        });
+        r.on('error', reject);
+        r.write(JSON.stringify({ raw_text: 'Looking for coaching', entity_name: 'Alpha' }));
+        r.end();
+      });
+      assert.strictEqual(missingProdCall.status, 400, 'Missing product must return HTTP 400');
+      assert(missingProdCall.body.error.includes('Product is required'), 'Error must specify product required');
+      noProdApp.server.close();
+      noProdDb.close();
+      for (const e of ['', '-wal', '-shm']) { try { fs.rmSync(noProdDbFile + e, { force: true }); } catch (_) {} }
+
+      // Invalid product ID (999999) -> must return HTTP 404
+      const invalidProdCall = await apiCall('/api/demand/signals', 'POST', {
+        raw_text: 'Looking for coaching in Anna Nagar',
+        entity_name: 'Alpha Abacus Academy',
+        productId: 999999
+      });
+      assert.strictEqual(invalidProdCall.status, 404, 'Invalid productId must return HTTP 404');
+      assert(invalidProdCall.body.error.includes('Product not found'), 'Error must specify product not found');
+
+      // Unrelated signal -> 0 opportunities created
+      const oppBefore = db.prepare('SELECT COUNT(*) n FROM lead_opportunities').get().n;
+      const unrelatedApiCall = await apiCall('/api/demand/signals', 'POST', {
+        raw_text: 'Where can I find bicycle repair mechanics in Chennai?',
+        entity_name: 'Bike Shop',
+        productId: prodYoga.id
+      });
+      assert.strictEqual(unrelatedApiCall.status, 200);
+      assert.strictEqual(unrelatedApiCall.body.relevance.relevant, false, 'Unrelated signal must be marked not relevant');
+      assert.strictEqual(unrelatedApiCall.body.opportunities.length, 0, 'ZERO opportunities must be created for unrelated signal');
+      const oppAfter = db.prepare('SELECT COUNT(*) n FROM lead_opportunities').get().n;
+      assert.strictEqual(oppAfter, oppBefore, 'Opportunity table count must not increase for unrelated signal');
+
+      // Resolve endpoint with invalid product -> 404
+      const resolveInvalid = await apiCall(`/api/demand/signals/${sig1.id}/resolve`, 'POST', { productId: 999999 });
+      assert.strictEqual(resolveInvalid.status, 404, 'Resolve endpoint with invalid productId must return 404');
+      console.log('    ok - API routes strictly reject missing/invalid products and block opportunities for non-relevant signals');
+    } finally {
+      app.server.close();
+    }
+
+    console.log('\nAll 23 Phase 2 Product Relevance tests passed successfully!\n');
   } finally {
     if (db) db.close();
     for (const ext of ['', '-wal', '-shm']) {
