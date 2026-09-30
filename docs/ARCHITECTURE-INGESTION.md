@@ -284,3 +284,65 @@ Product Relevance Engine & Opportunity Gate (status = 'unreviewed')
    - `POST /api/demand/sources/reddit`: Authenticated endpoint allowing authorized operators to trigger on-demand Reddit RSS ingestion with configurable query or URL parameters.
    - **Execution Model**: Manual, on-demand execution only. No background daemons, cron jobs, or automated polling loops are introduced.
    - **Human Confirmation Gate**: All downstream opportunities created remain in `'unreviewed'` status, strictly barring outreach until verified by an operator.
+
+---
+
+## 10. Phase 5: Multi-Platform Demand Discovery Architecture (`lib/sources/`)
+
+Phase 5 expands Demand Radar from Reddit-only ingestion into a generic, source-agnostic multi-platform demand discovery architecture while maintaining all safety, security, and human confirmation gates.
+
+```
+Public Demand Sources:
+[ Reddit RSS | YouTube | X | LinkedIn | Facebook | Instagram | TikTok | Threads | Generic RSS | Allow-listed Web ]
+    ↓
+Source Adapter Layer (SourceAdapter Base Contract)
+    ↓
+Common Security Boundary (HTTPS Only, Host Whitelists, redirect: 'error', SSRF Defense)
+    ↓
+Normalized Mentions (Standard Schema & PII Sanitization via lib/normalization.js)
+    ↓
+Audited Entity & Demand Extraction (Deterministic & Explainable via lib/extraction.js)
+    ↓
+Content-Hash Deduplication & Product-Neutral Storage (demand_signals)
+    ↓
+Product Relevance Evaluation (Domain-Agnostic Gating via lib/relevance.js)
+    ↓
+Lead Opportunity Creation (Status = 'unreviewed' in lead_opportunities)
+    ↓
+Human Confirmation Safety Gate (Mandatory Operator Sign-off before Outreach)
+```
+
+### Multi-Source Registry & Access Matrix
+
+All sources are registered centrally in `lib/sources/registry.js` declaring capability, authentication, rate limits, and access approval status:
+
+| Source ID | Platform | Access Method | Status | Credentials Required |
+| :--- | :--- | :--- | :--- | :--- |
+| `reddit_rss` | Reddit | Public RSS/Atom | `READY` | None (Public HTTPS) |
+| `youtube` | YouTube | Official YouTube Data API v3 | `READY_WHEN_CONFIGURED` | `YOUTUBE_API_KEY` |
+| `x` | X (Twitter) | Official X API v2 Search | `READY_WHEN_CONFIGURED` | `X_BEARER_TOKEN` |
+| `linkedin` | LinkedIn | Official Community Management API | `DISABLED_APPROVAL_REQUIRED` | Enterprise Partner Token |
+| `facebook` | Facebook | Official Meta Graph API | `DISABLED_APPROVAL_REQUIRED` | `FACEBOOK_ACCESS_TOKEN` |
+| `instagram` | Instagram | Official Instagram Graph API | `DISABLED_APPROVAL_REQUIRED` | `INSTAGRAM_ACCESS_TOKEN` |
+| `tiktok` | TikTok | Official TikTok API / Research | `DISABLED_APPROVAL_REQUIRED` | `TIKTOK_ACCESS_TOKEN` |
+| `threads` | Threads | Official Meta Threads API | `DISABLED_APPROVAL_REQUIRED` | `THREADS_ACCESS_TOKEN` |
+| `rss` | Generic RSS | Standard RSS 2.0 / Atom | `READY_WHEN_CONFIGURED` | None (Explicit Allow-list) |
+| `web` | Generic Web | Allow-listed Public Web Pages | `READY_WHEN_CONFIGURED` | None (Explicit Allow-list) |
+
+### Core Architectural Invariants
+
+1. **No Scraping or Automation Bypass**:
+   - Zero HTML scraping of restricted platforms (Facebook, Instagram, LinkedIn, X, TikTok, YouTube).
+   - Zero login automation, session hijacks, or CAPTCHA bypasses.
+   - Disabled states are explicit until official API credentials and partner approvals are configured.
+2. **Universal SSRF Defense Across All Adapters**:
+   - Native `fetch` uses `redirect: 'error'`. HTTP redirects are strictly rejected; redirected destinations are never fetched.
+   - Target hostnames must match explicit per-adapter allow-lists.
+   - Private IP ranges, loopbacks, link-local addresses, and cloud metadata (`169.254.169.254`) are rejected before network calls.
+   - Request timeouts (max 10s) and streaming byte limits (max 1–2 MB) are strictly enforced.
+3. **Execution Model**:
+   - **Manual and on-demand only**: Ingestion is triggered explicitly via authenticated operator API (`POST /api/demand/sources/:source`).
+   - Zero cron jobs, `setInterval` loops, background daemons, or automated polling.
+4. **Human Confirmation Safety Gate**:
+   - All opportunities created from any source default to status `'unreviewed'`.
+   - Outreach via WhatsApp or phone remains strictly blocked until confirmed by an operator.
