@@ -581,16 +581,37 @@ async function runMultiSourceTestSuite() {
       assert.match(webHostInjection.body, /server-side hostname allow-list/i);
 
       // 8. Client cannot inject API credentials for a credentialed source.
-      // X has an internal test fetch function, so exercise YouTube without one.
-      const youtubeCredentialInjection = await makeRequest(
-        port,
-        'POST',
-        '/api/demand/sources/youtube',
-        { query: 'test', apiKey: 'client-supplied-secret' },
-        cookie
-      );
-      assert.strictEqual(youtubeCredentialInjection.status, 503);
-      assert.match(youtubeCredentialInjection.body, /YouTube source is not configured/i);
+      // Create a separate test app/server WITHOUT sourceFetchFns.youtube, isolated from shell environment.
+      const savedYtKey = process.env.YOUTUBE_API_KEY;
+      delete process.env.YOUTUBE_API_KEY;
+      const noCredsSrv = createApp({
+        db,
+        pin: '1015'
+      });
+      await new Promise(r => noCredsSrv.server.listen(0, '127.0.0.1', r));
+      const noCredsPort = noCredsSrv.server.address().port;
+
+      try {
+        const noCredsLogin = await makeRequest(noCredsPort, 'POST', '/api/login', { pin: '1015' });
+        const noCredsCookie = noCredsLogin.headers['set-cookie'][0].split(';')[0];
+
+        const youtubeCredentialInjection = await makeRequest(
+          noCredsPort,
+          'POST',
+          '/api/demand/sources/youtube',
+          { query: 'test', apiKey: 'client-supplied-secret' },
+          noCredsCookie
+        );
+        assert.strictEqual(youtubeCredentialInjection.status, 503);
+        assert.match(youtubeCredentialInjection.body, /YouTube source is not configured/i);
+      } finally {
+        noCredsSrv.server.close();
+        if (savedYtKey !== undefined) {
+          process.env.YOUTUBE_API_KEY = savedYtKey;
+        } else {
+          delete process.env.YOUTUBE_API_KEY;
+        }
+      }
 
       // 9. Approval-gated platforms remain disabled even if a client supplies a token.
       const linkedinCredentialInjection = await makeRequest(
