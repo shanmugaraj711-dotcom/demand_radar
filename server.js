@@ -493,7 +493,34 @@ function createApp(opts = {}) {
     const maxItems = Math.max(1, Math.min(50, Number(body.maxItems) || 25));
     const target = url || (sourceId === 'reddit_rss' || sourceId === 'reddit' ? (subreddit ? { subreddit, query } : query) : (query || url));
 
+    const env = process.env;
     const sourceFetchFn = opts.sourceFetchFns?.[def.id] || opts.sourceFetchFn || (def.id === 'reddit_rss' ? opts.redditFetchFn : null);
+
+    // Client requests may select a source/query only. Security-sensitive source
+    // configuration and credentials are server-controlled and never accepted
+    // from the HTTP request body.
+    if (def.requires_approval) {
+      throw httpErr(403, `Source "${def.id}" is disabled pending required platform approval.`);
+    }
+    if (def.id === 'youtube' && !env.YOUTUBE_API_KEY && !sourceFetchFn) {
+      throw httpErr(503, 'YouTube source is not configured.');
+    }
+    if (def.id === 'x' && !env.X_BEARER_TOKEN && !sourceFetchFn) {
+      throw httpErr(503, 'X source is not configured.');
+    }
+
+    const allowedHostsEnv = def.id === 'rss'
+      ? env.RADAR_RSS_ALLOWED_HOSTS
+      : def.id === 'web'
+        ? env.RADAR_WEB_ALLOWED_HOSTS
+        : null;
+    const serverAllowedHosts = allowedHostsEnv
+      ? allowedHostsEnv.split(',').map(h => h.trim().toLowerCase()).filter(Boolean)
+      : undefined;
+
+    if ((def.id === 'rss' || def.id === 'web') && (!serverAllowedHosts || serverAllowedHosts.length === 0)) {
+      throw httpErr(503, `Source "${def.id}" is not configured with a server-side hostname allow-list.`);
+    }
 
     try {
       return await sourcesLib.ingestFromSource(db, def.id, target, {
@@ -502,11 +529,8 @@ function createApp(opts = {}) {
         evaluateRelevance: Boolean(body.evaluateRelevance !== false),
         timeoutMs: Math.min(10000, Number(body.timeoutMs) || 8000),
         fetchFn: sourceFetchFn,
-        allowedHosts: body.allowedHosts || opts.allowedHosts || undefined,
-        apiKey: body.apiKey || undefined,
-        bearerToken: body.bearerToken || undefined,
-        accessToken: body.accessToken || undefined,
-        researchTier: Boolean(body.researchTier)
+        allowedHosts: serverAllowedHosts,
+        researchTier: env.TIKTOK_RESEARCH_APPROVED === 'true'
       });
     } catch (err) {
       throw httpErr(400, `Source ingestion failed for "${def.id}": ${err.message}`);
