@@ -19,6 +19,7 @@ const auth = require('./lib/auth');
 const demand = require('./lib/demand');
 const productsLib = require('./lib/products');
 const relevanceLib = require('./lib/relevance');
+const ingestionLib = require('./lib/ingestion');
 const { norm, esc } = require('./lib/util');
 
 const MIME = { '.html': 'text/html; charset=utf-8', '.js': 'text/javascript; charset=utf-8', '.css': 'text/css; charset=utf-8', '.svg': 'image/svg+xml', '.png': 'image/png', '.ico': 'image/x-icon', '.webmanifest': 'application/manifest+json' };
@@ -450,6 +451,21 @@ function createApp(opts = {}) {
       }
     }
     return { ...result, relevance, matches, opportunities };
+  });
+  route('POST', '/api/demand/ingest', async ({ body }) => {
+    if (!body || typeof body !== 'object') throw httpErr(400, 'Mention body is required');
+    if (Array.isArray(body.mentions)) {
+      return await ingestionLib.ingestBatch(db, body.mentions, {
+        productId: body.productId || body.product_id,
+        evaluateRelevance: Boolean(body.evaluateRelevance !== false)
+      });
+    }
+    const res = await ingestionLib.ingestMention(db, body, {
+      productId: body.productId || body.product_id,
+      evaluateRelevance: Boolean(body.evaluateRelevance !== false)
+    });
+    if (res.rejected) throw httpErr(400, res.rejection_reason);
+    return res;
   });
   route('POST', '/api/demand/signals/:id/resolve', async ({ params, body }) => {
     const signal = db.prepare('SELECT * FROM demand_signals WHERE id=?').get(+params.id);
