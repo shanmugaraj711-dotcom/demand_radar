@@ -21,6 +21,7 @@ const productsLib = require('./lib/products');
 const relevanceLib = require('./lib/relevance');
 const ingestionLib = require('./lib/ingestion');
 const redditRss = require('./lib/reddit-rss');
+const sourcesLib = require('./lib/sources');
 const { norm, esc } = require('./lib/util');
 
 const MIME = { '.html': 'text/html; charset=utf-8', '.js': 'text/javascript; charset=utf-8', '.css': 'text/css; charset=utf-8', '.svg': 'image/svg+xml', '.png': 'image/png', '.ico': 'image/x-icon', '.webmanifest': 'application/manifest+json' };
@@ -467,6 +468,49 @@ function createApp(opts = {}) {
     });
     if (res.rejected) throw httpErr(400, res.rejection_reason);
     return res;
+  });
+  route('GET', '/api/demand/sources', async () => {
+    return {
+      sources: sourcesLib.getSourceRegistry(process.env)
+    };
+  });
+  route('POST', '/api/demand/sources/:source', async ({ params, body }) => {
+    if (!body || typeof body !== 'object') throw httpErr(400, 'Request body is required');
+    const sourceId = String(params.source || '').trim().toLowerCase();
+    const def = sourcesLib.findSourceDefinition(sourceId);
+    if (!def) {
+      throw httpErr(404, `Unknown demand source "${sourceId}".`);
+    }
+
+    const query = String(body.query || body.q || '').trim();
+    const url = String(body.url || '').trim();
+    const subreddit = String(body.subreddit || body.sub || '').trim();
+
+    if (!query && !url && !subreddit && !body.feedUrl) {
+      throw httpErr(400, 'Search query, subreddit, or target URL is required.');
+    }
+
+    const maxItems = Math.max(1, Math.min(50, Number(body.maxItems) || 25));
+    const target = url || (sourceId === 'reddit_rss' || sourceId === 'reddit' ? (subreddit ? { subreddit, query } : query) : (query || url));
+
+    const sourceFetchFn = opts.sourceFetchFns?.[def.id] || opts.sourceFetchFn || (def.id === 'reddit_rss' ? opts.redditFetchFn : null);
+
+    try {
+      return await sourcesLib.ingestFromSource(db, def.id, target, {
+        maxItems,
+        productId: body.productId || body.product_id,
+        evaluateRelevance: Boolean(body.evaluateRelevance !== false),
+        timeoutMs: Math.min(10000, Number(body.timeoutMs) || 8000),
+        fetchFn: sourceFetchFn,
+        allowedHosts: body.allowedHosts || opts.allowedHosts || undefined,
+        apiKey: body.apiKey || undefined,
+        bearerToken: body.bearerToken || undefined,
+        accessToken: body.accessToken || undefined,
+        researchTier: Boolean(body.researchTier)
+      });
+    } catch (err) {
+      throw httpErr(400, `Source ingestion failed for "${def.id}": ${err.message}`);
+    }
   });
   route('POST', '/api/demand/sources/reddit', async ({ body }) => {
     if (!body || typeof body !== 'object') throw httpErr(400, 'Request body is required');
