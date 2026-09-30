@@ -9,6 +9,7 @@ This document summarizes the Phase 4 architecture, implementation, and verificat
   - Enforces HTTPS only (`validateRedditUrl`).
   - Strict host whitelist: `reddit.com`, `www.reddit.com`, `old.reddit.com`, and `np.reddit.com`.
   - Rejects loopback/private IPs, URLs with embedded credentials (`user:pass@`), and non-standard ports.
+  - Rejects HTTP redirects (`redirect: 'error'`) to prevent SSRF bypass to internal endpoints or metadata services.
   - Imposes strict payload size caps (default 1 MB) and network timeouts (default 10s).
 - **Pipeline Integration**: Ingested entries pass through the full existing pipeline:
   `RedditRssAdapter` → `normalizeMention()` (PII redaction, canonical URL) → `extractDemand()` (audited deterministic extraction) → `ingestMention()` (SHA-256 deduplication, product relevance filtering, opportunity generation).
@@ -18,7 +19,7 @@ This document summarizes the Phase 4 architecture, implementation, and verificat
 
 ### 2. Files Added & Modified
 - Added `lib/reddit-rss.js`: `RedditRssAdapter`, `ingestRedditRss`, `validateRedditUrl`, `buildRedditRssUrl`, `parseRedditXml`, `stripHtml`, and `unescapeHtml`.
-- Added `test/reddit-rss.test.js`: 19 comprehensive adversarial tests covering all required edge cases (A through R + API route).
+- Added `test/reddit-rss.test.js`: 20 comprehensive adversarial tests covering all required edge cases (A through T + API route).
 - Modified `server.js`: Added authenticated `POST /api/demand/sources/reddit` route with input validation.
 - Modified `package.json`: Included `test/reddit-rss.test.js` in `npm test` and `npm run test:local`.
 - Modified `docs/ARCHITECTURE-INGESTION.md`: Added Section 9 detailing Phase 4 Reddit RSS live public source architecture.

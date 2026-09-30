@@ -14,6 +14,7 @@ const {
   validateRedditUrl,
   buildRedditRssUrl,
   parseRedditXml,
+  safeFetchRss,
   stripHtml,
   unescapeHtml
 } = require('../lib/reddit-rss');
@@ -374,6 +375,55 @@ async function runPhase4RedditRssTestSuite() {
       srv.server.close();
     }
     pass('S. API endpoint: POST /api/demand/sources/reddit verified for auth, query, and SSRF rejection');
+
+    // -------------------------------------------------------------------------
+    // Test T: Adversarial redirect rejection (SSRF protection)
+    // -------------------------------------------------------------------------
+    let destinationFetched = false;
+    const redirectServer = http.createServer((req, res) => {
+      if (req.url === '/redirect-302') {
+        res.writeHead(302, { 'Location': `http://127.0.0.1:${redirectServer.address().port}/forbidden-internal-dest` });
+        res.end();
+      } else if (req.url === '/redirect-301') {
+        res.writeHead(301, { 'Location': 'http://169.254.169.254/latest/meta-data/' });
+        res.end();
+      } else if (req.url === '/forbidden-internal-dest') {
+        destinationFetched = true;
+        res.writeHead(200, { 'Content-Type': 'text/plain' });
+        res.end('INTERNAL_SECRET_DATA');
+      } else {
+        res.writeHead(404);
+        res.end();
+      }
+    });
+
+    await new Promise(r => redirectServer.listen(0, '127.0.0.1', r));
+    const redirectPort = redirectServer.address().port;
+
+    try {
+      // 1. safeFetchRss with native fetch and 302 redirect
+      await assert.rejects(async () => {
+        await safeFetchRss(`http://127.0.0.1:${redirectPort}/redirect-302`, {
+          timeoutMs: 3000
+        });
+      }, /redirect/i);
+
+      // Verify destination was strictly NOT accessed
+      assert.strictEqual(destinationFetched, false, 'Redirect destination must never be fetched');
+
+      // 2. safeFetchRss with 301 redirect to cloud metadata address
+      await assert.rejects(async () => {
+        await safeFetchRss(`http://127.0.0.1:${redirectPort}/redirect-301`, {
+          timeoutMs: 3000
+        });
+      }, /redirect/i);
+
+      // Verify destination remains strictly untouched
+      assert.strictEqual(destinationFetched, false, 'Cloud metadata destination must never be fetched');
+    } finally {
+      redirectServer.close();
+    }
+    pass('T. Adversarial redirect rejection: HTTP redirects are rejected (redirect: error) and destination is never fetched');
 
     console.log(`\nAll ${testCount} Phase 4 Reddit RSS tests passed successfully!\n`);
   } finally {

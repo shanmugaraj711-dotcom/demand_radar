@@ -275,6 +275,7 @@ Product Relevance Engine & Opportunity Gate (status = 'unreviewed')
    - **HTTPS Enforcement**: Only `https://` URLs are permitted.
    - **Strict Host Whitelist**: Restricts requests strictly to `reddit.com`, `www.reddit.com`, `old.reddit.com`, and `np.reddit.com`.
    - **SSRF Protection**: Explicitly forbids loopback/private IPs, credentials in URL (`user:pass@`), and non-standard ports.
+   - **HTTP Redirect Rejection**: Native fetch enforces `redirect: 'error'`, strictly rejecting 3xx redirects to prevent SSRF redirection to internal network or cloud metadata services.
    - **Byte Caps & Timeouts**: Defaults to 1 MB maximum response payload and 10-second request timeout to prevent denial-of-service from runaway or oversized responses.
    - **Safe XML/Atom Parsing**: Dependency-free regex/tag parser without entity resolution (XXE immune).
 
