@@ -15,14 +15,30 @@ function testProductIsolation() {
   const testDbFile = path.join(tmpDir, `product-isolation-${Date.now()}.db`);
 
   try {
-    const db = db_.open(testDbFile);
+    const db = db_.open(testDbFile, { autoMigrate: false });
 
-    // 1. Initial State: Default Product Seeded
-    const activeProd = productsLib.getActiveProduct(db);
+    // 1. Fail clearly if profile is missing product configuration
+    assert.throws(
+      () => productsLib.seedDefaultProduct(db),
+      /Cannot seed default product: settings profile is missing product configuration./,
+      'Must fail clearly if settings profile is missing product info'
+    );
+
+    // Save profile configuration and seed default product
+    db.prepare("INSERT INTO settings(k, v) VALUES ('profile', ?)").run(JSON.stringify({
+      product: 'Alpha Suite',
+      topic: 'lead generation',
+      org: 'agency',
+      link: 'https://alphasuite.test',
+      offer: 'Free trial',
+      target_keywords: ['lead gen', 'sales']
+    }));
+
+    const activeProd = productsLib.seedDefaultProduct(db);
     assert(activeProd, 'Active product must exist');
-    assert.strictEqual(activeProd.slug, 'abacus-buddy');
-    assert.strictEqual(activeProd.name, 'Abacus Buddy AI');
-    assert.strictEqual(activeProd.topic, 'abacus');
+    assert.strictEqual(activeProd.slug, 'alpha-suite');
+    assert.strictEqual(activeProd.name, 'Alpha Suite');
+    assert.strictEqual(activeProd.topic, 'lead generation');
     assert.strictEqual(activeProd.active, 1);
 
     // 2. Product CRUD Operations
@@ -146,7 +162,7 @@ function testProductIsolation() {
     // 5. Query and Isolation by Product ID
     const oppA = demand.getOpportunity(db, oppAId);
     assert.strictEqual(oppA.product_id, activeProd.id);
-    assert.strictEqual(oppA.product.name, 'Abacus Buddy AI');
+    assert.strictEqual(oppA.product.name, 'Alpha Suite');
     assert.strictEqual(oppA.status, 'unreviewed');
 
     const oppB = demand.getOpportunity(db, oppBId);
@@ -213,8 +229,8 @@ function testProductIsolation() {
     assert.strictEqual(outreachPostA.blocked, undefined);
     assert(outreachPostA.text.length > 0);
     assert(outreachPostA.wa.includes('wa.me/919845011111'));
-    // Product A is Abacus Buddy AI
-    assert(outreachPostA.text.includes('Abacus Buddy AI') || outreachPostA.text.includes('abacus'));
+    // Product A is Alpha Suite
+    assert(outreachPostA.text.includes('Alpha Suite') || outreachPostA.text.includes('lead generation'));
 
     // CRITICAL: Opp-B MUST REMAIN UNREVIEWED AND BLOCKED
     const oppBStillUnreviewed = demand.getOpportunity(db, oppBId);
@@ -301,18 +317,17 @@ async function testProductApi() {
   const port = app.server.address().port;
 
   try {
-    // GET /api/products
+    // GET /api/products (starts with initial seeded product)
     let res = await makeRequest(port, '/api/products');
     assert.strictEqual(res.status, 200);
     assert.strictEqual(res.body.rows.length, 1);
-    assert.strictEqual(res.body.rows[0].slug, 'abacus-buddy');
 
-    // GET /api/products/active
+    // GET /api/products/active (initial product is active)
     res = await makeRequest(port, '/api/products/active');
     assert.strictEqual(res.status, 200);
-    assert.strictEqual(res.body.slug, 'abacus-buddy');
+    assert(res.body.name);
 
-    // POST /api/products
+    // POST /api/products (create dance-pro as active)
     res = await makeRequest(port, '/api/products', {
       method: 'POST',
       body: {
@@ -324,44 +339,65 @@ async function testProductApi() {
         link: 'https://dancepro.test',
         offer: '7-day trial',
         target_keywords: ['dance', 'kathak', 'bharatanatyam'],
-        active: false
+        active: true
       }
     });
     assert.strictEqual(res.status, 200);
     assert.strictEqual(res.body.slug, 'dance-pro');
-    const newProdId = res.body.id;
+    const firstProdId = res.body.id;
 
-    // GET /api/products/:id
-    res = await makeRequest(port, `/api/products/${newProdId}`);
+    // GET /api/products/active (now dance-pro)
+    res = await makeRequest(port, '/api/products/active');
     assert.strictEqual(res.status, 200);
-    assert.strictEqual(res.body.name, 'DancePro AI');
+    assert.strictEqual(res.body.slug, 'dance-pro');
 
-    // PUT /api/products/:id
-    res = await makeRequest(port, `/api/products/${newProdId}`, {
-      method: 'PUT',
-      body: { description: 'Updated dance academy management' }
+    // POST /api/products (create second product)
+    res = await makeRequest(port, '/api/products', {
+      method: 'POST',
+      body: {
+        slug: 'music-flow',
+        name: 'MusicFlow AI',
+        description: 'Music school scheduling',
+        topic: 'music classes',
+        target_org: 'school',
+        active: false
+      }
     });
     assert.strictEqual(res.status, 200);
-    assert.strictEqual(res.body.description, 'Updated dance academy management');
+    assert.strictEqual(res.body.slug, 'music-flow');
+    const secondProdId = res.body.id;
+
+    // GET /api/products/:id
+    res = await makeRequest(port, `/api/products/${secondProdId}`);
+    assert.strictEqual(res.status, 200);
+    assert.strictEqual(res.body.name, 'MusicFlow AI');
+
+    // PUT /api/products/:id
+    res = await makeRequest(port, `/api/products/${secondProdId}`, {
+      method: 'PUT',
+      body: { description: 'Updated music school scheduling' }
+    });
+    assert.strictEqual(res.status, 200);
+    assert.strictEqual(res.body.description, 'Updated music school scheduling');
 
     // POST /api/products/:id/activate
-    res = await makeRequest(port, `/api/products/${newProdId}/activate`, { method: 'POST' });
+    res = await makeRequest(port, `/api/products/${secondProdId}/activate`, { method: 'POST' });
     assert.strictEqual(res.status, 200);
     assert.strictEqual(res.body.active, 1);
 
-    // Verify active is now dance-pro
+    // Verify active is now music-flow
     res = await makeRequest(port, '/api/products/active');
     assert.strictEqual(res.status, 200);
-    assert.strictEqual(res.body.id, newProdId);
+    assert.strictEqual(res.body.id, secondProdId);
 
     // GET /api/products?active=1
     res = await makeRequest(port, '/api/products?active=1');
     assert.strictEqual(res.status, 200);
     assert.strictEqual(res.body.rows.length, 1);
-    assert.strictEqual(res.body.rows[0].id, newProdId);
+    assert.strictEqual(res.body.rows[0].id, secondProdId);
 
     // DELETE /api/products/:id (deleting active product will switch active to remaining)
-    res = await makeRequest(port, `/api/products/${newProdId}`, { method: 'DELETE' });
+    res = await makeRequest(port, `/api/products/${secondProdId}`, { method: 'DELETE' });
     assert.strictEqual(res.status, 200);
     assert.strictEqual(res.body.ok, true);
 

@@ -11,6 +11,7 @@ const messages = require('../lib/messages');
 const file = path.join(os.tmpdir(), 'radar-demand-safety-' + process.pid + '.db');
 for (const s of ['', '-wal', '-shm']) fs.rmSync(file + s, { force: true });
 const db = open(file);
+const products = require('../lib/products');
 
 function addLead(id, name, area, address = area) {
   const now = Date.now();
@@ -19,6 +20,13 @@ function addLead(id, name, area, address = area) {
 }
 
 try {
+  products.createProduct(db, {
+    slug: 'clinic-safety-bot',
+    name: 'ClinicBot AI',
+    description: 'Clinic assistant',
+    topic: 'appointments',
+    active: 1
+  });
   addLead(1001, 'Sri Ganesh Abacus', 'Anna Nagar', '2nd Cross, Anna Nagar');
   addLead(1002, 'Sri Ganesha Abacus', 'Anna Nagar', '2nd Cross, Anna Nagar');
   addLead(1003, 'Business A Clinic', 'Indiranagar', '4th Cross, Indiranagar');
