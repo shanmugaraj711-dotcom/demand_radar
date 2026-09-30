@@ -685,7 +685,124 @@ async function testPhase2ProductRelevance() {
       app.server.close();
     }
 
-    console.log('\nAll 23 Phase 2 Product Relevance tests passed successfully!\n');
+    // =========================================================================
+    // Test 24: Domain-Agnostic Relevance — Domain A: GST / Tax Filing
+    // =========================================================================
+    console.log('  Testing 24. Domain-agnostic relevance: GST / Tax Filing...');
+    const prodGst = productsLib.createProduct(db, {
+      slug: 'gst-tax-advisor',
+      name: 'GST Filing & Tax Advisory',
+      description: 'Monthly GST returns filing, input tax credit reconciliation, and tax compliance for small businesses',
+      topic: 'tax filing',
+      target_org: 'small business',
+      target_keywords: ['gst return', 'tax filing', 'gst compliance', 'accounting'],
+      active: false
+    });
+
+    const sigGstPos = demand.insertSignal(db, {
+      source: 'social',
+      source_id: 'sig-gst-pos-24',
+      raw_text: 'Need someone to file GST returns for my small business.',
+      entity_name: 'Metro Retailers',
+      location_hint: 'Chennai'
+    });
+
+    const relGstPos = await relevanceLib.evaluateRelevance(db, prodGst, sigGstPos.signal);
+    assert.strictEqual(relGstPos.relevant, true, 'GST returns filing demand MUST be relevant for GST filing product');
+    assert(relGstPos.confidence >= 0.70, `Confidence must be >= 0.70 (got ${relGstPos.confidence})`);
+
+    const sigGstNeg = demand.insertSignal(db, {
+      source: 'social',
+      source_id: 'sig-gst-neg-24',
+      raw_text: 'Looking for a website designer for my business.',
+      entity_name: 'Metro Retailers',
+      location_hint: 'Chennai'
+    });
+
+    const relGstNeg = await relevanceLib.evaluateRelevance(db, prodGst, sigGstNeg.signal);
+    assert.strictEqual(relGstNeg.relevant, false, 'Web designer demand must NOT be relevant for GST filing product');
+    assert(relGstNeg.confidence <= 0.30, `Confidence must be <= 0.30 (got ${relGstNeg.confidence})`);
+    console.log('    ok - GST filing correctly accepted GST demand (>= 0.70) and rejected web design demand (<= 0.30)');
+
+    // =========================================================================
+    // Test 25: Domain-Agnostic Relevance — Domain B: Home Appliance Repair
+    // =========================================================================
+    console.log('  Testing 25. Domain-agnostic relevance: Home Appliance Repair...');
+    const prodAppliance = productsLib.createProduct(db, {
+      slug: 'home-appliance-repair',
+      name: 'Home Appliance Repair Service',
+      description: 'Doorstep repair and maintenance for home air conditioners, refrigerators, and washing machines',
+      topic: 'appliance repair',
+      target_org: 'household',
+      target_keywords: ['ac repair', 'appliance repair', 'cooling', 'technician'],
+      active: false
+    });
+
+    const sigAcPos = demand.insertSignal(db, {
+      source: 'social',
+      source_id: 'sig-ac-pos-25',
+      raw_text: 'My AC is not cooling. Need an AC technician.',
+      entity_name: 'Home Owner',
+      location_hint: 'Chennai'
+    });
+
+    const relAcPos = await relevanceLib.evaluateRelevance(db, prodAppliance, sigAcPos.signal);
+    assert.strictEqual(relAcPos.relevant, true, 'AC cooling/technician demand MUST be relevant for appliance repair product');
+    assert(relAcPos.confidence >= 0.70, `Confidence must be >= 0.70 (got ${relAcPos.confidence})`);
+
+    const sigAcNeg = demand.insertSignal(db, {
+      source: 'social',
+      source_id: 'sig-ac-neg-25',
+      raw_text: 'Looking for an SEO agency to improve Google rankings.',
+      entity_name: 'Growth Agency',
+      location_hint: 'Chennai'
+    });
+
+    const relAcNeg = await relevanceLib.evaluateRelevance(db, prodAppliance, sigAcNeg.signal);
+    assert.strictEqual(relAcNeg.relevant, false, 'SEO agency demand must NOT be relevant for appliance repair product');
+    assert(relAcNeg.confidence <= 0.30, `Confidence must be <= 0.30 (got ${relAcNeg.confidence})`);
+    console.log('    ok - Appliance repair correctly accepted AC technician demand (>= 0.70) and rejected SEO demand (<= 0.30)');
+
+    // =========================================================================
+    // Test 26: Domain-Agnostic Relevance — Domain C: Wedding Photography
+    // =========================================================================
+    console.log('  Testing 26. Domain-agnostic relevance: Wedding Photography...');
+    const prodWedding = productsLib.createProduct(db, {
+      slug: 'moments-wedding-photo',
+      name: 'Moments Wedding Photography',
+      description: 'Candid wedding photography, pre-wedding shoots, and traditional marriage videography',
+      topic: 'wedding photography',
+      target_org: 'wedding couple',
+      target_keywords: ['wedding photography', 'photographer', 'wedding photoshoot', 'videography'],
+      active: false
+    });
+
+    const sigWeddingPos = demand.insertSignal(db, {
+      source: 'social',
+      source_id: 'sig-wed-pos-26',
+      raw_text: 'Looking for a photographer for my wedding next month.',
+      entity_name: 'Couple',
+      location_hint: 'Chennai'
+    });
+
+    const relWeddingPos = await relevanceLib.evaluateRelevance(db, prodWedding, sigWeddingPos.signal);
+    assert.strictEqual(relWeddingPos.relevant, true, 'Wedding photographer demand MUST be relevant for wedding photography product');
+    assert(relWeddingPos.confidence >= 0.70, `Confidence must be >= 0.70 (got ${relWeddingPos.confidence})`);
+
+    const sigWeddingNeg = demand.insertSignal(db, {
+      source: 'social',
+      source_id: 'sig-wed-neg-26',
+      raw_text: 'Need a plumber to fix a bathroom leak.',
+      entity_name: 'Tenant',
+      location_hint: 'Chennai'
+    });
+
+    const relWeddingNeg = await relevanceLib.evaluateRelevance(db, prodWedding, sigWeddingNeg.signal);
+    assert.strictEqual(relWeddingNeg.relevant, false, 'Plumbing demand must NOT be relevant for wedding photography product');
+    assert(relWeddingNeg.confidence <= 0.30, `Confidence must be <= 0.30 (got ${relWeddingNeg.confidence})`);
+    console.log('    ok - Wedding photography correctly accepted photographer demand (>= 0.70) and rejected plumber demand (<= 0.30)');
+
+    console.log('\nAll 26 Phase 2 Product Relevance tests passed successfully!\n');
   } finally {
     if (db) db.close();
     for (const ext of ['', '-wal', '-shm']) {
