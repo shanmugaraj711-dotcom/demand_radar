@@ -10,7 +10,15 @@ const demand = require('../lib/demand');
 const file = path.join(os.tmpdir(), 'radar-demand-' + process.pid + '.db');
 for (const s of ['', '-wal', '-shm']) fs.rmSync(file + s, { force: true });
 const db = open(file);
+const products = require('../lib/products');
 try {
+  products.createProduct(db, {
+    slug: 'clinic-bot',
+    name: 'ClinicBot AI',
+    description: 'Clinic assistant',
+    topic: 'appointments',
+    active: 1
+  });
   const now = Date.now();
   db.prepare('INSERT INTO leads(id,name,address,area,city,phone,wa,phone_type,lat,lng,score,stage,created,updated) VALUES(?,?,?,?,?,?,?,?,?,?,?,?,?,?)')
     .run(8492, 'Dr Sharma Clinic', '4th Cross, Indiranagar, Bengaluru, Karnataka', 'Indiranagar', 'Bengaluru', '+919800000000', '919800000000', 'mobile', 12.9719, 77.6412, 80, 'new', now, now);

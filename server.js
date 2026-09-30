@@ -17,6 +17,7 @@ const ai = require('./lib/ai');
 const appsLib = require('./lib/apps');
 const auth = require('./lib/auth');
 const demand = require('./lib/demand');
+const productsLib = require('./lib/products');
 const { norm, esc } = require('./lib/util');
 
 const MIME = { '.html': 'text/html; charset=utf-8', '.js': 'text/javascript; charset=utf-8', '.css': 'text/css; charset=utf-8', '.svg': 'image/svg+xml', '.png': 'image/png', '.ico': 'image/x-icon', '.webmanifest': 'application/manifest+json' };
@@ -338,6 +339,54 @@ function createApp(opts = {}) {
     return { demandSignals: db.prepare('SELECT COUNT(*) n FROM demand_signals').get().n, opportunities: db.prepare("SELECT COUNT(*) n FROM lead_opportunities WHERE status='unreviewed'").get().n, hasPlaces: !!s.placesKey, hasAnthropic: !!s.anthropicKey, placesUsedToday: db_.usedToday(db, 'places'), placesDailyCap: s.placesDailyCap, due: q.due.length, fresh: q.fresh.length, leads: db.prepare('SELECT COUNT(*) n FROM leads').get().n, node: process.version, auth: AUTH.enabled };
   });
   route('GET', '/api/settings', () => ({ settings: settingsLib.publicView(S()), steps: leadsLib.STEPS }));
+  /* ------------------------------------------------------------ products */
+  route('GET', '/api/products', ({ query }) => {
+    const activeOnly = query.active === '1' || query.active === 'true';
+    return { rows: productsLib.listProducts(db, { activeOnly }) };
+  });
+  route('GET', '/api/products/active', () => {
+    const active = productsLib.getActiveProduct(db);
+    if (!active) throw httpErr(404, 'No active product found');
+    return active;
+  });
+  route('POST', '/api/products', ({ body }) => {
+    try {
+      const created = productsLib.createProduct(db, body || {});
+      return created;
+    } catch (e) {
+      throw httpErr(400, e.message);
+    }
+  });
+  route('GET', '/api/products/:id', ({ params }) => {
+    const prod = productsLib.getProductById(db, +params.id);
+    if (!prod) throw httpErr(404, 'Product not found');
+    return prod;
+  });
+  route('PUT', '/api/products/:id', ({ params, body }) => {
+    try {
+      const updated = productsLib.updateProduct(db, +params.id, body || {});
+      return updated;
+    } catch (e) {
+      throw httpErr(400, e.message);
+    }
+  });
+  route('POST', '/api/products/:id/activate', ({ params }) => {
+    try {
+      const activated = productsLib.activateProduct(db, +params.id);
+      return activated;
+    } catch (e) {
+      throw httpErr(400, e.message);
+    }
+  });
+  route('DELETE', '/api/products/:id', ({ params }) => {
+    try {
+      return productsLib.deleteProduct(db, +params.id);
+    } catch (e) {
+      throw httpErr(400, e.message);
+    }
+  });
+
+  /* ------------------------------------------------------------ demand signals & opportunities */
   route('GET', '/api/demand/signals', ({ query }) => {
     const limit = Math.min(200, Math.max(1, +query.limit || 50));
     const rows = db.prepare('SELECT * FROM demand_signals ORDER BY id DESC LIMIT ?').all(limit);
@@ -348,32 +397,38 @@ function createApp(opts = {}) {
     try { result = demand.insertSignal(db, body || {}); } catch (e) { throw httpErr(400, e.message); }
     const matches = demand.resolve(db, result.signal, 5);
     const opportunities = [];
+    const activeProduct = productsLib.getActiveProduct(db);
+    const productId = body && (body.productId || body.product_id) ? Number(body.productId || body.product_id) : (activeProduct ? activeProduct.id : 1);
     if (result.inserted) {
       for (const m of matches.filter((x) => x.match_status === 'matched')) {
         const id = demand.createOpportunity(db, result.id, {
           lead_id: m.lead_id, leadReason: result.signal.detected_need || result.signal.intent_class || 'demand signal',
           confidence: m.confidence, reasons: m.reasons, distance_km: m.distance_km,
           signalSource: result.signal.source, sourceUrl: result.signal.source_url,
-          observedAt: result.signal.observed_at, rawText: result.signal.raw_text
+          observedAt: result.signal.observed_at, rawText: result.signal.raw_text,
+          product_id: productId
         });
-        opportunities.push({ id, lead_id: m.lead_id, confidence: m.confidence, reasons: m.reasons });
+        opportunities.push({ id, lead_id: m.lead_id, product_id: productId, confidence: m.confidence, reasons: m.reasons });
       }
     }
     return { ...result, matches, opportunities };
   });
-  route('POST', '/api/demand/signals/:id/resolve', ({ params }) => {
+  route('POST', '/api/demand/signals/:id/resolve', ({ params, body }) => {
     const signal = db.prepare('SELECT * FROM demand_signals WHERE id=?').get(+params.id);
     if (!signal) throw httpErr(404, 'Demand signal not found');
     const matches = demand.resolve(db, signal, 5);
     const opportunities = [];
+    const activeProduct = productsLib.getActiveProduct(db);
+    const productId = body && (body.productId || body.product_id) ? Number(body.productId || body.product_id) : (activeProduct ? activeProduct.id : 1);
     for (const m of matches.filter((x) => x.match_status === 'matched')) {
       const id = demand.createOpportunity(db, signal.id, {
         lead_id: m.lead_id, leadReason: signal.detected_need || signal.intent_class || 'demand signal',
         confidence: m.confidence, reasons: m.reasons, distance_km: m.distance_km,
         signalSource: signal.source, sourceUrl: signal.source_url,
-        observedAt: signal.observed_at, rawText: signal.raw_text
+        observedAt: signal.observed_at, rawText: signal.raw_text,
+        product_id: productId
       });
-      opportunities.push({ id, lead_id: m.lead_id, confidence: m.confidence, reasons: m.reasons });
+      opportunities.push({ id, lead_id: m.lead_id, product_id: productId, confidence: m.confidence, reasons: m.reasons });
     }
     return { signal, matches, opportunities };
   });
@@ -394,7 +449,7 @@ function createApp(opts = {}) {
     } catch (e) { throw httpErr(400, e.message); }
   });
   route('POST', '/api/demand/opportunities/:id/action', ({ params, body }) => {
-    const opportunity = db.prepare('SELECT * FROM lead_opportunities WHERE id=?').get(+params.id);
+    const opportunity = demand.getOpportunity(db, +params.id);
     if (!opportunity) throw httpErr(404, 'Opportunity not found');
     const leadRow = db.prepare('SELECT * FROM leads WHERE id=?').get(opportunity.lead_id);
     if (!leadRow) throw httpErr(404, 'Lead not found');
@@ -408,11 +463,15 @@ function createApp(opts = {}) {
   route('GET', '/api/demand/opportunities', ({ query }) => {
     const limit = Math.min(200, Math.max(1, +query.limit || 50));
     const status = query.status ? String(query.status) : null;
-    const where = status ? ' WHERE o.status=?' : '';
-    const args = status ? [status, limit] : [limit];
-    const rows = db.prepare(demand.OPPORTUNITY_SELECT + where + ' ORDER BY o.updated_at DESC LIMIT ?').all(...args);
-    const countSql = status ? 'SELECT COUNT(*) n FROM lead_opportunities WHERE status=?' : 'SELECT COUNT(*) n FROM lead_opportunities';
-    const total = db.prepare(countSql).get(...(status ? [status] : [])).n;
+    const productId = query.productId || query.product_id ? Number(query.productId || query.product_id) : null;
+    const conds = [];
+    const args = [];
+    if (status) { conds.push('o.status=?'); args.push(status); }
+    if (productId) { conds.push('o.product_id=?'); args.push(productId); }
+    const where = conds.length ? ' WHERE ' + conds.join(' AND ') : '';
+    const rows = db.prepare(demand.OPPORTUNITY_SELECT + where + ' ORDER BY o.updated_at DESC LIMIT ?').all(...args, limit);
+    const countSql = 'SELECT COUNT(*) n FROM lead_opportunities o' + where;
+    const total = db.prepare(countSql).get(...args).n;
     return { total, rows: rows.map(demand.formatOpportunity) };
   });
 
