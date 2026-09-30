@@ -67,3 +67,13 @@ Demand signals currently require **structured `entity_name` and `location_hint` 
 > **Do not connect this to automated raw-text social ingestion until an entity-extraction step is built and separately audited.**
 
 Demand-derived outreach has a permanent human-confirmation gate: an opportunity must be explicitly confirmed by an authenticated user before a demand-derived message or WhatsApp action is rendered. Confidence scores never substitute for human confirmation.
+
+## Product relevance engine (Phase 2)
+
+Demand signals are evaluated against specific products before opportunities are created:
+1. **Deterministic relevance gate**: Checks keywords, topic, token/stem overlap, and negative/exclusion terms locally and deterministically.
+2. **Semantic relevance classifier**: Pluggable provider interface (`RelevanceProvider`, `LocalSemanticClassifier`, `LLMRelevanceProvider`, `MockRelevanceProvider`) verifying buyer/lead intent vs non-customer intent (employment, classifieds) and sarcasm. Returns strict structured JSON (`relevant`, `confidence`, `matched_need`, `pitch_angle`, `reason`) and fails closed on provider error.
+3. **Product-isolated caching**: Cached by `SHA-256(product.id + demand_signal.content_hash)`.
+4. **Safety gate preserved**: Opportunities are created only when relevant, always starting in `unreviewed` state with outreach blocked until confirmed by a human.
+
+> **Phase 2 Scope Boundary**: Does NOT implement external social ingestion, free-form entity extraction, or the "For Me" user interface. Detailed architecture: [docs/ARCHITECTURE-RELEVANCE.md](docs/ARCHITECTURE-RELEVANCE.md).
