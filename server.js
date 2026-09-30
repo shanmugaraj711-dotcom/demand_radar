@@ -16,6 +16,7 @@ const csv = require('./lib/csv');
 const ai = require('./lib/ai');
 const appsLib = require('./lib/apps');
 const auth = require('./lib/auth');
+const demand = require('./lib/demand');
 const { norm, esc } = require('./lib/util');
 
 const MIME = { '.html': 'text/html; charset=utf-8', '.js': 'text/javascript; charset=utf-8', '.css': 'text/css; charset=utf-8', '.svg': 'image/svg+xml', '.png': 'image/png', '.ico': 'image/x-icon', '.webmanifest': 'application/manifest+json' };
@@ -334,9 +335,87 @@ function createApp(opts = {}) {
   route('GET', '/api/state', () => {
     const s = S();
     const q = leadsLib.queue(db, s);
-    return { hasPlaces: !!s.placesKey, hasAnthropic: !!s.anthropicKey, placesUsedToday: db_.usedToday(db, 'places'), placesDailyCap: s.placesDailyCap, due: q.due.length, fresh: q.fresh.length, leads: db.prepare('SELECT COUNT(*) n FROM leads').get().n, node: process.version, auth: AUTH.enabled };
+    return { demandSignals: db.prepare('SELECT COUNT(*) n FROM demand_signals').get().n, opportunities: db.prepare("SELECT COUNT(*) n FROM lead_opportunities WHERE status='unreviewed'").get().n, hasPlaces: !!s.placesKey, hasAnthropic: !!s.anthropicKey, placesUsedToday: db_.usedToday(db, 'places'), placesDailyCap: s.placesDailyCap, due: q.due.length, fresh: q.fresh.length, leads: db.prepare('SELECT COUNT(*) n FROM leads').get().n, node: process.version, auth: AUTH.enabled };
   });
   route('GET', '/api/settings', () => ({ settings: settingsLib.publicView(S()), steps: leadsLib.STEPS }));
+  route('GET', '/api/demand/signals', ({ query }) => {
+    const limit = Math.min(200, Math.max(1, +query.limit || 50));
+    const rows = db.prepare('SELECT * FROM demand_signals ORDER BY id DESC LIMIT ?').all(limit);
+    return { total: db.prepare('SELECT COUNT(*) n FROM demand_signals').get().n, rows };
+  });
+  route('POST', '/api/demand/signals', ({ body }) => {
+    let result;
+    try { result = demand.insertSignal(db, body || {}); } catch (e) { throw httpErr(400, e.message); }
+    const matches = demand.resolve(db, result.signal, 5);
+    const opportunities = [];
+    if (result.inserted) {
+      for (const m of matches.filter((x) => x.match_status === 'matched')) {
+        const id = demand.createOpportunity(db, result.id, {
+          lead_id: m.lead_id, leadReason: result.signal.detected_need || result.signal.intent_class || 'demand signal',
+          confidence: m.confidence, reasons: m.reasons, distance_km: m.distance_km,
+          signalSource: result.signal.source, sourceUrl: result.signal.source_url,
+          observedAt: result.signal.observed_at, rawText: result.signal.raw_text
+        });
+        opportunities.push({ id, lead_id: m.lead_id, confidence: m.confidence, reasons: m.reasons });
+      }
+    }
+    return { ...result, matches, opportunities };
+  });
+  route('POST', '/api/demand/signals/:id/resolve', ({ params }) => {
+    const signal = db.prepare('SELECT * FROM demand_signals WHERE id=?').get(+params.id);
+    if (!signal) throw httpErr(404, 'Demand signal not found');
+    const matches = demand.resolve(db, signal, 5);
+    const opportunities = [];
+    for (const m of matches.filter((x) => x.match_status === 'matched')) {
+      const id = demand.createOpportunity(db, signal.id, {
+        lead_id: m.lead_id, leadReason: signal.detected_need || signal.intent_class || 'demand signal',
+        confidence: m.confidence, reasons: m.reasons, distance_km: m.distance_km,
+        signalSource: signal.source, sourceUrl: signal.source_url,
+        observedAt: signal.observed_at, rawText: signal.raw_text
+      });
+      opportunities.push({ id, lead_id: m.lead_id, confidence: m.confidence, reasons: m.reasons });
+    }
+    return { signal, matches, opportunities };
+  });
+  route('POST', '/api/demand/opportunities/:id/confirm', ({ params, req }) => {
+    const actor = AUTH.actor(req);
+    if (!actor) throw httpErr(401, 'Authenticated user required.');
+    try {
+      demand.confirmOpportunity(db, +params.id, actor);
+      return demand.getOpportunity(db, +params.id);
+    } catch (e) { throw httpErr(400, e.message); }
+  });
+  route('POST', '/api/demand/opportunities/:id/reject', ({ params, req }) => {
+    const actor = AUTH.actor(req);
+    if (!actor) throw httpErr(401, 'Authenticated user required.');
+    try {
+      demand.rejectOpportunity(db, +params.id, actor);
+      return demand.getOpportunity(db, +params.id);
+    } catch (e) { throw httpErr(400, e.message); }
+  });
+  route('POST', '/api/demand/opportunities/:id/action', ({ params, body }) => {
+    const opportunity = db.prepare('SELECT * FROM lead_opportunities WHERE id=?').get(+params.id);
+    if (!opportunity) throw httpErr(404, 'Opportunity not found');
+    const leadRow = db.prepare('SELECT * FROM leads WHERE id=?').get(opportunity.lead_id);
+    if (!leadRow) throw httpErr(404, 'Lead not found');
+    return messages.action({ ...leadsLib.hydrate(leadRow), lang: body.lang || leadRow.lang }, S(), body.step, opportunity);
+  });
+  route('GET', '/api/demand/opportunities/:id', ({ params }) => {
+    const opp = demand.getOpportunity(db, +params.id);
+    if (!opp) throw httpErr(404, 'Opportunity not found');
+    return opp;
+  });
+  route('GET', '/api/demand/opportunities', ({ query }) => {
+    const limit = Math.min(200, Math.max(1, +query.limit || 50));
+    const status = query.status ? String(query.status) : null;
+    const where = status ? ' WHERE o.status=?' : '';
+    const args = status ? [status, limit] : [limit];
+    const rows = db.prepare(demand.OPPORTUNITY_SELECT + where + ' ORDER BY o.updated_at DESC LIMIT ?').all(...args);
+    const countSql = status ? 'SELECT COUNT(*) n FROM lead_opportunities WHERE status=?' : 'SELECT COUNT(*) n FROM lead_opportunities';
+    const total = db.prepare(countSql).get(...(status ? [status] : [])).n;
+    return { total, rows: rows.map(demand.formatOpportunity) };
+  });
+
   route('PUT', '/api/settings', ({ body }) => { settingsLib.save(db, body); return { settings: settingsLib.publicView(S()) }; });
 
   route('GET', '/api/sources', () => ({ sources: Object.entries(suggest.SOURCES).map(([id, x]) => ({ id, label: x.label, default: suggest.DEFAULT_SOURCES.includes(id) })) }));
@@ -457,7 +536,7 @@ function createApp(opts = {}) {
         const params = url.pathname.match(r.re).groups || {};
         const query = Object.fromEntries(url.searchParams);
         const body = ['POST', 'PUT', 'PATCH'].includes(req.method) ? await readJson(req) : {};
-        const out = await r.fn({ params, query, body });
+        const out = await r.fn({ params, query, body, req });
         if (out && out.csv !== undefined) {
           res.writeHead(200, { 'Content-Type': 'text/csv; charset=utf-8', 'Content-Disposition': `attachment; filename="${out.filename}"` });
           return res.end('﻿' + out.csv);

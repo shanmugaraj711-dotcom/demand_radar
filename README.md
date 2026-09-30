@@ -58,3 +58,12 @@ Runs login/security checks, then the whole stack. Google Places, the geocoder an
 - Google Play has no open search, so only the App Store is used for competing apps.
 - Place names in phrases are guessed, then checked with OpenStreetMap's geocoder, so tiny villages may be dropped.
 - Message templates in Tamil were written quickly. Have a native speaker check them before sending.
+
+
+## Social-demand bridge: safety and current limitation
+
+Demand signals currently require **structured `entity_name` and `location_hint` fields**. The resolver does **not** extract a business entity or location from `raw_text`.
+
+> **Do not connect this to automated raw-text social ingestion until an entity-extraction step is built and separately audited.**
+
+Demand-derived outreach has a permanent human-confirmation gate: an opportunity must be explicitly confirmed by an authenticated user before a demand-derived message or WhatsApp action is rendered. Confidence scores never substitute for human confirmation.
